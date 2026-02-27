@@ -21,6 +21,8 @@ from tools.doc_search.pdf_indexer import PdfIndexer
 from tools.doc_search.word_indexer import WordIndexer
 from tools.doc_search.text_indexer import TextIndexer
 from tools.doc_search.swagger_indexer import SwaggerIndexer
+from tools.doc_search.image_indexer import ImageIndexer
+from tools.doc_search.web_indexer import WebIndexer
 from tools.doc_search.vector_store import DocumentVectorStore
 from tools.doc_search.base import DocumentIndexer
 
@@ -29,7 +31,7 @@ class RagTool:
     """
     Unified RAG tool for document search.
 
-    Supports: PDF, Word, Markdown, Text, OpenAPI/Swagger
+    Supports: PDF, Word, Markdown, Text, OpenAPI/Swagger, Images, Web URLs
     """
 
     # File extension to indexer mapping
@@ -43,6 +45,14 @@ class RagTool:
         ".rst": TextIndexer,
         ".yaml": SwaggerIndexer,
         ".yml": SwaggerIndexer,
+        # Image formats
+        ".png": ImageIndexer,
+        ".jpg": ImageIndexer,
+        ".jpeg": ImageIndexer,
+        ".gif": ImageIndexer,
+        ".bmp": ImageIndexer,
+        ".svg": ImageIndexer,
+        ".webp": ImageIndexer,
     }
 
     def __init__(self, index_name: str = "docs"):
@@ -53,6 +63,13 @@ class RagTool:
         # Initialize indexers
         for ext, indexer_class in self.INDEXERS.items():
             self.indexers[ext] = indexer_class()
+
+        # Initialize web indexer (not in INDEXERS dict)
+        try:
+            self.web_indexer = WebIndexer()
+        except ImportError:
+            self.web_indexer = None
+            print("[RAG] Warning: WebIndexer not available. Install with: pip install trafilatura requests beautifulsoup4")
 
         # Load existing index if available
         self.vector_store.load()
@@ -140,6 +157,66 @@ class RagTool:
 
         return counts
 
+    def ingest_url(self, url: str) -> int:
+        """
+        Ingest a web page from URL into the vector index.
+
+        Args:
+            url: URL to scrape and index
+
+        Returns:
+            Number of chunks added
+        """
+        if not self.web_indexer:
+            print("[RAG] WebIndexer not available. Install with: pip install trafilatura requests beautifulsoup4")
+            return 0
+
+        if not url.startswith(("http://", "https://")):
+            print(f"[RAG] Invalid URL: {url}")
+            return 0
+
+        try:
+            chunks = self.web_indexer.ingest(url)
+            added = self.vector_store.add_chunks(chunks, show_progress=False)
+            print(f"[RAG] Indexed {url}: {added} chunks")
+
+            # Save index after ingestion
+            self.vector_store.save()
+
+            return added
+        except Exception as e:
+            print(f"[RAG] Failed to index {url}: {e}")
+            return 0
+
+    def ingest_urls(self, urls: List[str]) -> Dict[str, int]:
+        """
+        Ingest multiple web pages from URLs.
+
+        Args:
+            urls: List of URLs to scrape and index
+
+        Returns:
+            Dictionary with domain-level counts
+        """
+        from urllib.parse import urlparse
+
+        if not self.web_indexer:
+            print("[RAG] WebIndexer not available. Install with: pip install trafilatura requests beautifulsoup4")
+            return {}
+
+        counts = {}
+        for url in urls:
+            if not url.startswith(("http://", "https://")):
+                print(f"[RAG] Skipping invalid URL: {url}")
+                continue
+
+            domain = urlparse(url).netloc
+            added = self.ingest_url(url)
+            if added > 0:
+                counts[domain] = counts.get(domain, 0) + added
+
+        return counts
+
     def search(
         self,
         query: str,
@@ -217,6 +294,14 @@ class RagTool:
             ".rst": "text",
             ".yaml": "swagger",
             ".yml": "swagger",
+            # Image formats
+            ".png": "image",
+            ".jpg": "image",
+            ".jpeg": "image",
+            ".gif": "image",
+            ".bmp": "image",
+            ".svg": "image",
+            ".webp": "image",
         }
         return type_map.get(ext, "text")
 

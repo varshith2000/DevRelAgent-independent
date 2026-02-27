@@ -22,9 +22,12 @@ REPOS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # Ollama Embedding Settings
-OLLAMA_EMBED_URL = os.getenv("OLLAMA_EMBED_URL", "http://localhost:11434/api/embeddings")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_EMBED_URL = os.getenv("OLLAMA_EMBED_URL", f"{OLLAMA_BASE_URL}/api/embeddings")
+OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")  # For vision models
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 EMBED_DIMENSION = 768  # nomic-embed-text dimension
+VISION_MODEL = os.getenv("VISION_MODEL", "llava")  # For image captioning
 
 # Chunking Settings
 CHUNK_SIZE = 256   # words per chunk (text fallback)

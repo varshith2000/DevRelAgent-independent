@@ -23,6 +23,8 @@ def test_imports():
             WordIndexer,
             TextIndexer,
             SwaggerIndexer,
+            ImageIndexer,
+            WebIndexer,
             DocumentVectorStore,
             RagTool,
             create_rag_tool
@@ -58,13 +60,14 @@ def test_indexers():
     """Test individual indexers."""
     print("\n🔍 Testing indexers...")
 
-    from tools.doc_search import PdfIndexer, WordIndexer, TextIndexer, SwaggerIndexer
+    from tools.doc_search import PdfIndexer, WordIndexer, TextIndexer, SwaggerIndexer, ImageIndexer
 
     indexers = [
         ("PDF", PdfIndexer),
         ("Word", WordIndexer),
         ("Text", TextIndexer),
         ("Swagger", SwaggerIndexer),
+        ("Image", ImageIndexer),
     ]
 
     for name, indexer_class in indexers:
@@ -75,6 +78,13 @@ def test_indexers():
         except Exception as e:
             print(f"  ✗ {name} Indexer failed: {e}")
             return False
+
+    # Test WebIndexer separately (requires additional dependencies)
+    try:
+        from tools.doc_search import WebIndexer
+        print(f"  ✓ Web Indexer: Available (trafilatura + requests + beautifulsoup4)")
+    except ImportError:
+        print(f"  ⚠️  Web Indexer: Not available (install with: pip install trafilatura requests beautifulsoup4)")
 
     return True
 
@@ -122,12 +132,14 @@ def check_dependencies():
     """Check optional dependencies."""
     print("\n🔍 Checking dependencies...")
 
+    # Core dependencies
     deps = [
         ("faiss", "faiss"),
         ("PyMuPDF", "fitz"),
         ("pdfplumber", "pdfplumber"),
         ("python-docx", "docx"),
         ("PyYAML", "yaml"),
+        ("PIL (Pillow)", "PIL"),
         ("requests", "requests"),
         ("numpy", "numpy"),
     ]
@@ -141,9 +153,29 @@ def check_dependencies():
             print(f"  ✗ {name} (not installed)")
             missing.append(name)
 
+    # Web scraping dependencies (optional)
+    print("\n  Web Scraping (optional):")
+    web_deps = [
+        ("trafilatura", "trafilatura"),
+        ("beautifulsoup4", "bs4"),
+    ]
+
+    web_missing = []
+    for name, module in web_deps:
+        try:
+            __import__(module)
+            print(f"  ✓ {name}")
+        except ImportError:
+            print(f"  ✗ {name} (not installed)")
+            web_missing.append(name)
+
+    if web_missing:
+        print(f"\n  ⚠️  Web scraping disabled. Install with:")
+        print(f"     pip install {' '.join(web_missing)}")
+
     if missing:
-        print(f"\n⚠️  Missing dependencies: {', '.join(missing)}")
-        print("Install with: pip install " + " ".join(missing).lower())
+        print(f"\n⚠️  Missing core dependencies: {', '.join(missing)}")
+        print("Install with: pip install " + " ".join(missing).lower().replace(" (pillow)", ""))
 
     return len(missing) == 0
 

@@ -1,56 +1,647 @@
 """
 Tool Registry — Registration and selection of agent tools
 
-TODO: Implement tool registration framework for Phase 1
-- Register tools with name, description, and handler
-- LLM function calling schema generation
-- Tool selection based on intent
+Production-grade tool registry with:
+- Tool registration with name, description, and handler
+- OpenAI/Anthropic function calling schema generation
+- Intent-based tool selection
+- Parameter validation
+- Async and sync execution
+- Tool categories and metadata
+- Tool health monitoring
+
+Usage:
+    from tools.registry import ToolRegistry, get_registry, tool
+
+    @tool(
+        name="search_code",
+        description="Search code semantically",
+        parameters={"query": {"type": "string", "description": "Search query"}}
+    )
+    def search_code(query: str, top_k: int = 5):
+        # Tool implementation
+        pass
+
+    registry = get_registry()
+    result = await registry.execute_tool("search_code", {"query": "authentication"})
 """
 
-from typing import Dict, Any, Callable, Optional, List
+import asyncio
+import logging
+from typing import (
+    Dict, Any, Callable, Optional, List,
+    Union, Awaitable, TypeVar, ParamSpec
+)
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+import inspect
+import json
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+P = ParamSpec('P')
+
+
+class ToolCategory(Enum):
+    """Categories of tools for organization."""
+    CODE_SEARCH = "code_search"
+    DOCUMENT_SEARCH = "document_search"
+    DATABASE_QUERY = "database_query"
+    SYSTEM = "system"
+    MEMORY = "memory"
+    UTILITY = "utility"
+    API = "api"
+
+
+@dataclass
+class ToolParameter:
+    """Definition of a tool parameter."""
+    name: str
+    type: str
+    description: str = ""
+    required: bool = True
+    default: Any = None
+    enum: Optional[List[Any]] = None
+
+    def to_openai_schema(self) -> dict:
+        """Convert to OpenAI function calling schema format."""
+        schema = {
+            "type": self.type,
+            "description": self.description,
+        }
+
+        if self.enum:
+            schema["enum"] = self.enum
+
+        if not self.required and self.default is not None:
+            schema["default"] = self.default
+
+        return schema
+
+
+@dataclass
+class ToolMetadata:
+    """Metadata about a tool."""
+    name: str
+    description: str
+    category: ToolCategory = ToolCategory.UTILITY
+    version: str = "1.0.0"
+    author: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
+    timeout_seconds: int = 30
+    async_executable: bool = False
+    enabled: bool = True
+
+
+@dataclass
+class ToolExecutionResult:
+    """Result of executing a tool."""
+    tool_name: str
+    success: bool
+    result: Any = None
+    error: Optional[str] = None
+    execution_time_ms: Optional[int] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "tool_name": self.tool_name,
+            "success": self.success,
+            "result": self.result,
+            "error": self.error,
+            "execution_time_ms": self.execution_time_ms,
+            "timestamp": self.timestamp.isoformat(),
+        }
+
+
+class Tool:
+    """
+    Represents a tool that can be called by the agent.
+
+    Wraps a function handler with metadata and parameter definitions.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        handler: Union[Callable, Callable[..., Awaitable]],
+        description: str = "",
+        parameters: Optional[Dict[str, Dict[str, Any]]] = None,
+        metadata: Optional[ToolMetadata] = None,
+    ):
+        """
+        Initialize a tool.
+
+        Args:
+            name: Unique tool name
+            handler: Function to execute (sync or async)
+            description: What the tool does
+            parameters: Parameter definitions in OpenAI schema format
+            metadata: Additional tool metadata
+        """
+        self.name = name
+        self.handler = handler
+        self.description = description or f"Execute {name}"
+        self.metadata = metadata or ToolMetadata(name=name, description=description)
+
+        # Parse parameters
+        self.parameters: Dict[str, ToolParameter] = {}
+        if parameters:
+            for param_name, param_def in parameters.items():
+                self.parameters[param_name] = ToolParameter(
+                    name=param_name,
+                    type=param_def.get("type", "string"),
+                    description=param_def.get("description", ""),
+                    required=param_def.get("required", True),
+                    default=param_def.get("default"),
+                    enum=param_def.get("enum"),
+                )
+
+        # Detect if handler is async
+        self.is_async = inspect.iscoroutinefunction(handler)
+        self.metadata.async_executable = self.is_async
+
+        # Extract parameters from function signature if not provided
+        if not self.parameters:
+            self._extract_parameters_from_signature()
+
+    def _extract_parameters_from_signature(self):
+        """Extract parameter definitions from function signature."""
+        sig = inspect.signature(self.handler)
+
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            param_type = "string"
+            if param.annotation != inspect.Parameter.empty:
+                annotation_str = str(param.annotation)
+                if "int" in annotation_str.lower():
+                    param_type = "integer"
+                elif "float" in annotation_str.lower() or "double" in annotation_str.lower():
+                    param_type = "number"
+                elif "bool" in annotation_str.lower():
+                    param_type = "boolean"
+                elif "list" in annotation_str.lower() or "dict" in annotation_str.lower():
+                    param_type = "object"
+
+            required = param.default == inspect.Parameter.empty
+            default = None if required else param.default
+
+            self.parameters[param_name] = ToolParameter(
+                name=param_name,
+                type=param_type,
+                required=required,
+                default=default,
+            )
+
+    async def execute(
+        self,
+        arguments: Dict[str, Any],
+        timeout_seconds: Optional[int] = None,
+    ) -> ToolExecutionResult:
+        """
+        Execute the tool with arguments.
+
+        Args:
+            arguments: Keyword arguments for the tool
+            timeout_seconds: Override default timeout
+
+        Returns:
+            ToolExecutionResult with outcome
+        """
+        start_time = datetime.now()
+
+        try:
+            # Validate required parameters
+            missing_params = [
+                name for name, param in self.parameters.items()
+                if param.required and name not in arguments
+            ]
+
+            if missing_params:
+                raise ValueError(f"Missing required parameters: {missing_params}")
+
+            # Execute with timeout
+            timeout = timeout_seconds or self.metadata.timeout_seconds
+
+            if self.is_async:
+                result = await asyncio.wait_for(
+                    self.handler(**arguments),
+                    timeout=timeout,
+                )
+            else:
+                # Run sync function in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: self.handler(**arguments)),
+                    timeout=timeout,
+                )
+
+            execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+            return ToolExecutionResult(
+                tool_name=self.name,
+                success=True,
+                result=result,
+                execution_time_ms=execution_time,
+            )
+
+        except asyncio.TimeoutError:
+            execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+            return ToolExecutionResult(
+                tool_name=self.name,
+                success=False,
+                error=f"Tool execution exceeded timeout ({timeout}s)",
+                execution_time_ms=execution_time,
+            )
+
+        except Exception as e:
+            execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
+            logger.error(f"Tool {self.name} execution failed: {e}")
+            return ToolExecutionResult(
+                tool_name=self.name,
+                success=False,
+                error=str(e),
+                execution_time_ms=execution_time,
+            )
+
+    def to_openai_schema(self) -> dict:
+        """
+        Generate OpenAI function calling schema.
+
+        Returns:
+            Dictionary in OpenAI function format
+        """
+        properties = {}
+        required = []
+
+        for param_name, param in self.parameters.items():
+            properties[param_name] = param.to_openai_schema()
+            if param.required:
+                required.append(param_name)
+
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        }
+
+    def to_anthropic_schema(self) -> dict:
+        """
+        Generate Anthropic tool use schema.
+
+        Returns:
+            Dictionary in Anthropic tool format
+        """
+        input_schema = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+        for param_name, param in self.parameters.items():
+            input_schema["properties"][param_name] = param.to_openai_schema()
+            if param.required:
+                input_schema["required"].append(param_name)
+
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": input_schema,
+        }
+
+    def __repr__(self) -> str:
+        return f"Tool(name={self.name}, category={self.metadata.category.value})"
 
 
 class ToolRegistry:
     """
-    Registry of available tools the agent can call.
-    
-    Usage:
-        registry = ToolRegistry()
-        registry.register("search_code", search_code_fn, "Search code semantically")
-        tool = registry.get("search_code")
+    Production-grade tool registry.
+
+    Features:
+    - Tool registration and management
+    - Intent-to-tool mapping
+    - Multi-provider schema generation (OpenAI, Anthropic)
+    - Tool execution with error handling
+    - Tool health monitoring
+    - Tool categories and filtering
     """
 
+    # Intent keywords mapped to tool names for routing
+    INTENT_KEYWORDS: Dict[str, List[str]] = {
+        "code_search": [
+            "search code", "find code", "code", "function", "class",
+            "implementation", "how does", "where is", "locate"
+        ],
+        "document_search": [
+            "search docs", "documentation", "readme", "guide", "how to",
+            "authenticate", "authorization", "api docs"
+        ],
+        "clickhouse_query": [
+            "database", "query", "sql", "logs", "metrics", "recent",
+            "errors", "show me", "count", "statistics", "data"
+        ],
+    }
+
     def __init__(self):
-        self._tools: Dict[str, Dict[str, Any]] = {}
+        self._tools: Dict[str, Tool] = {}
+        self._intent_to_tool: Dict[str, str] = {}
+        self._execution_stats: Dict[str, Dict[str, Any]] = {}
 
-    def register(self, name: str, handler: Callable, description: str = "", schema: Optional[Dict] = None):
-        """Register a tool."""
-        self._tools[name] = {
-            "name": name,
-            "handler": handler,
-            "description": description,
-            "schema": schema or {},
+    def register(
+        self,
+        name: Optional[str] = None,
+        description: str = "",
+        parameters: Optional[Dict[str, Dict[str, Any]]] = None,
+        category: ToolCategory = ToolCategory.UTILITY,
+        **metadata_kwargs
+    ):
+        """
+        Decorator for registering tools.
+
+        Usage:
+            @registry.register(name="my_tool", description="Does something")
+            def my_function(arg1: str, arg2: int = 5):
+                return {"result": "done"}
+
+        Args:
+            name: Tool name (default: function name)
+            description: Tool description
+            parameters: Parameter definitions
+            category: Tool category
+            **metadata_kwargs: Additional metadata
+        """
+        def decorator(func: Callable):
+            tool_name = name or func.__name__
+
+            metadata = ToolMetadata(
+                name=tool_name,
+                description=description,
+                category=category,
+                **metadata_kwargs
+            )
+
+            tool = Tool(
+                name=tool_name,
+                handler=func,
+                description=description,
+                parameters=parameters,
+                metadata=metadata,
+            )
+
+            self._tools[tool_name] = tool
+            self._execution_stats[tool_name] = {
+                "calls": 0,
+                "errors": 0,
+                "total_time_ms": 0,
+            }
+
+            logger.info(f"Registered tool: {tool_name} ({category.value})")
+            return func
+
+        return decorator
+
+    def register_tool(self, tool: Tool) -> None:
+        """
+        Register an existing Tool instance.
+
+        Args:
+            tool: Tool instance to register
+        """
+        self._tools[tool.name] = tool
+        self._execution_stats[tool.name] = {
+            "calls": 0,
+            "errors": 0,
+            "total_time_ms": 0,
         }
+        logger.info(f"Registered tool: {tool.name}")
 
-    def get(self, name: str) -> Optional[Dict[str, Any]]:
+    def register_manual(
+        self,
+        name: str,
+        handler: Callable,
+        description: str = "",
+        parameters: Optional[Dict[str, Dict[str, Any]]] = None,
+        **kwargs
+    ) -> None:
+        """
+        Manually register a tool (non-decorator).
+
+        Args:
+            name: Tool name
+            handler: Function to call
+            description: Tool description
+            parameters: Parameter definitions
+            **kwargs: Additional metadata
+        """
+        tool = Tool(
+            name=name,
+            handler=handler,
+            description=description,
+            parameters=parameters,
+            metadata=ToolMetadata(name=name, description=description, **kwargs),
+        )
+
+        self.register_tool(tool)
+
+    def get(self, name: str) -> Optional[Tool]:
         """Get a tool by name."""
         return self._tools.get(name)
 
-    def list_tools(self) -> List[Dict[str, Any]]:
-        """List all registered tools."""
-        return [{"name": t["name"], "description": t["description"]} for t in self._tools.values()]
+    def list_tools(
+        self,
+        category: Optional[ToolCategory] = None,
+        enabled_only: bool = True,
+    ) -> List[Tool]:
+        """
+        List all registered tools.
+
+        Args:
+            category: Filter by category
+            enabled_only: Only return enabled tools
+
+        Returns:
+            List of tools
+        """
+        tools = list(self._tools.values())
+
+        if category:
+            tools = [t for t in tools if t.metadata.category == category]
+
+        if enabled_only:
+            tools = [t for t in tools if t.metadata.enabled]
+
+        return tools
+
+    def list_tool_names(self, **kwargs) -> List[str]:
+        """Get list of tool names."""
+        return [t.name for t in self.list_tools(**kwargs)]
 
     @property
     def tool_names(self) -> List[str]:
+        """All tool names."""
         return list(self._tools.keys())
 
+    async def execute_tool(
+        self,
+        name: str,
+        arguments: Dict[str, Any],
+        timeout_seconds: Optional[int] = None,
+    ) -> ToolExecutionResult:
+        """
+        Execute a tool by name.
 
-# Singleton
+        Args:
+            name: Tool name
+            arguments: Tool arguments
+            timeout_seconds: Override timeout
+
+        Returns:
+            ToolExecutionResult
+        """
+        tool = self.get(name)
+
+        if not tool:
+            return ToolExecutionResult(
+                tool_name=name,
+                success=False,
+                error=f"Tool '{name}' not found",
+            )
+
+        if not tool.metadata.enabled:
+            return ToolExecutionResult(
+                tool_name=name,
+                success=False,
+                error=f"Tool '{name}' is disabled",
+            )
+
+        # Update stats
+        self._execution_stats[name]["calls"] += 1
+
+        result = await tool.execute(arguments, timeout_seconds)
+
+        # Update stats
+        if not result.success:
+            self._execution_stats[name]["errors"] += 1
+        if result.execution_time_ms:
+            self._execution_stats[name]["total_time_ms"] += result.execution_time_ms
+
+        return result
+
+    def route_by_intent(self, intent: str) -> Optional[str]:
+        """
+        Route an intent to the appropriate tool.
+
+        Args:
+            intent: User intent description
+
+        Returns:
+            Tool name or None
+        """
+        intent_lower = intent.lower()
+
+        # Check registered intent mappings
+        for tool_name, keywords in self.INTENT_KEYWORDS.items():
+            if any(kw in intent_lower for kw in keywords):
+                if tool_name in self._tools:
+                    return tool_name
+
+        # Fallback: check tool descriptions
+        for tool in self._tools.values():
+            if any(kw in tool.description.lower() for kw in intent_lower.split()):
+                return tool.name
+
+        return None
+
+    def get_openai_schemas(self, **kwargs) -> List[dict]:
+        """Get all tools as OpenAI function schemas."""
+        return [t.to_openai_schema() for t in self.list_tools(**kwargs)]
+
+    def get_anthropic_schemas(self, **kwargs) -> List[dict]:
+        """Get all tools as Anthropic tool schemas."""
+        return [t.to_anthropic_schema() for t in self.list_tools(**kwargs)]
+
+    def get_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Get execution statistics for all tools."""
+        return self._execution_stats.copy()
+
+    def clear_stats(self):
+        """Clear all execution statistics."""
+        for name in self._execution_stats:
+            self._execution_stats[name] = {
+                "calls": 0,
+                "errors": 0,
+                "total_time_ms": 0,
+            }
+
+    def enable_tool(self, name: str) -> bool:
+        """Enable a tool."""
+        tool = self.get(name)
+        if tool:
+            tool.metadata.enabled = True
+            return True
+        return False
+
+    def disable_tool(self, name: str) -> bool:
+        """Disable a tool."""
+        tool = self.get(name)
+        if tool:
+            tool.metadata.enabled = False
+            return True
+        return False
+
+    def __repr__(self) -> str:
+        enabled = sum(1 for t in self._tools.values() if t.metadata.enabled)
+        return f"ToolRegistry(tools={len(self._tools)}, enabled={enabled})"
+
+
+# Convenience decorator
+def tool(
+    name: Optional[str] = None,
+    description: str = "",
+    parameters: Optional[Dict[str, Dict[str, Any]]] = None,
+    category: ToolCategory = ToolCategory.UTILITY,
+    **kwargs
+):
+    """
+    Convenience decorator for registering tools.
+
+    Usage:
+        @tool(name="my_tool", description="Does something")
+        def my_function(arg1: str):
+            return {"result": "done"}
+    """
+    registry = get_registry()
+    return registry.register(
+        name=name,
+        description=description,
+        parameters=parameters,
+        category=category,
+        **kwargs
+    )
+
+
+# Singleton instance
 _registry: Optional[ToolRegistry] = None
 
 
 def get_registry() -> ToolRegistry:
+    """Get the global tool registry instance."""
     global _registry
     if _registry is None:
         _registry = ToolRegistry()
     return _registry
+
+
+def reset_registry():
+    """Reset the global registry (mainly for testing)."""
+    global _registry
+    _registry = None

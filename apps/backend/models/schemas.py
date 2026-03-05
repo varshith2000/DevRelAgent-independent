@@ -173,3 +173,33 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
     tool_calls: List[ToolCallResult] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class ChatStreamChunk(BaseModel):
+    """Single chunk in streaming response."""
+    type: Literal["token", "tool_call", "error", "done"] = "token"
+    content: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    session_id: str
+
+
+class SessionContext(BaseModel):
+    """Conversation session context."""
+    session_id: str
+    messages: List[Dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.now)
+    last_activity: datetime = Field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    tool_call_history: List[ToolCallResult] = Field(default_factory=list)
+
+
+class StreamChatRequest(BaseModel):
+    """Streaming chat request."""
+    message: str
+    session_id: Optional[str] = None
+    include_tool_calls: bool = True
+    stream_tokens: bool = True

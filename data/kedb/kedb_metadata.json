@@ -1,0 +1,172 @@
+[
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Authentication failed: Invalid JWT token",
+    "root_cause": "JWT token expired or malformed due to clock skew between services",
+    "solution": "Check system time synchronization and update JWT validation logic to handle clock skew",
+    "service_name": "auth-service",
+    "severity": "high",
+    "tags": [
+      "authentication",
+      "jwt",
+      "security"
+    ],
+    "created_at": "2026-03-05T16:00:07.369425",
+    "resolved_at": "2026-03-05T16:00:07.369434",
+    "resolution_time_minutes": 45,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Database connection timeout in user service",
+    "root_cause": "Connection pool exhausted due to long-running queries",
+    "solution": "Optimize slow queries and increase connection pool size",
+    "service_name": "user-service",
+    "severity": "critical",
+    "tags": [
+      "database",
+      "performance",
+      "timeout"
+    ],
+    "created_at": "2026-03-05T16:00:07.388135",
+    "resolved_at": "2026-03-05T16:00:07.388141",
+    "resolution_time_minutes": 120,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Rate limit exceeded for API endpoint /api/v1/users",
+    "root_cause": "Sudden spike in traffic from mobile app release",
+    "solution": "Increase rate limits temporarily and implement better caching",
+    "service_name": "api-gateway",
+    "severity": "medium",
+    "tags": [
+      "rate-limiting",
+      "api",
+      "traffic"
+    ],
+    "created_at": "2026-03-05T16:00:07.402876",
+    "resolved_at": "2026-03-05T16:00:07.402881",
+    "resolution_time_minutes": 30,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Memory leak in payment processing service",
+    "root_cause": "Unclosed database connections in payment validation loop",
+    "solution": "Add proper connection cleanup in finally blocks",
+    "service_name": "payment-service",
+    "severity": "high",
+    "tags": [
+      "memory",
+      "payment",
+      "database"
+    ],
+    "created_at": "2026-03-05T16:00:07.421552",
+    "resolved_at": "2026-03-05T16:00:07.421559",
+    "resolution_time_minutes": 90,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "SSL certificate validation failed",
+    "root_cause": "Certificate expired for external payment provider",
+    "solution": "Update certificate and implement automated renewal",
+    "service_name": "payment-gateway",
+    "severity": "critical",
+    "tags": [
+      "ssl",
+      "certificate",
+      "security"
+    ],
+    "created_at": "2026-03-05T16:00:07.499206",
+    "resolved_at": "2026-03-05T16:00:07.499212",
+    "resolution_time_minutes": 60,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Redis connection refused",
+    "root_cause": "Redis server ran out of memory and crashed",
+    "solution": "Increase Redis memory limit and implement proper eviction policy",
+    "service_name": "cache-service",
+    "severity": "high",
+    "tags": [
+      "redis",
+      "cache",
+      "memory"
+    ],
+    "created_at": "2026-03-05T16:00:07.521746",
+    "resolved_at": "2026-03-05T16:00:07.521762",
+    "resolution_time_minutes": 75,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "File upload fails with 413 Request Entity Too Large",
+    "root_cause": "Nginx client_max_body_size too small for large file uploads",
+    "solution": "Increase client_max_body_size in Nginx configuration",
+    "service_name": "file-service",
+    "severity": "medium",
+    "tags": [
+      "nginx",
+      "upload",
+      "configuration"
+    ],
+    "created_at": "2026-03-05T16:00:07.544302",
+    "resolved_at": "2026-03-05T16:00:07.544307",
+    "resolution_time_minutes": 15,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Elasticsearch cluster health red",
+    "root_cause": "Disk space full on primary shard nodes",
+    "solution": "Clean up old indices and increase disk space",
+    "service_name": "search-service",
+    "severity": "critical",
+    "tags": [
+      "elasticsearch",
+      "disk",
+      "storage"
+    ],
+    "created_at": "2026-03-05T16:00:07.566656",
+    "resolved_at": "2026-03-05T16:00:07.566663",
+    "resolution_time_minutes": 180,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "Kubernetes pod stuck in CrashLoopBackOff",
+    "root_cause": "Missing environment variable for database URL",
+    "solution": "Add DATABASE_URL to deployment configuration",
+    "service_name": "notification-service",
+    "severity": "high",
+    "tags": [
+      "kubernetes",
+      "deployment",
+      "configuration"
+    ],
+    "created_at": "2026-03-05T16:00:07.590974",
+    "resolved_at": "2026-03-05T16:00:07.590979",
+    "resolution_time_minutes": 25,
+    "similar_count": 0
+  },
+  {
+    "id": "ke_20260305_160007",
+    "error_signature": "GraphQL query timeout on user dashboard",
+    "root_cause": "N+1 query problem in user relationships",
+    "solution": "Implement DataLoader pattern for batch loading",
+    "service_name": "graphql-api",
+    "severity": "medium",
+    "tags": [
+      "graphql",
+      "performance",
+      "n+1"
+    ],
+    "created_at": "2026-03-05T16:00:07.612665",
+    "resolved_at": "2026-03-05T16:00:07.612676",
+    "resolution_time_minutes": 150,
+    "similar_count": 0
+  }
+]

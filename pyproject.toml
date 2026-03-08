@@ -10,35 +10,34 @@ dependencies = [
     "uvicorn>=0.34.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
-
     # === LLM Providers (multi-provider support) ===
-    "anthropic>=0.45.0",          # Default LLM provider
-    "openai>=1.30.0",             # Optional: OpenAI GPT-4o
-    "google-genai>=1.0.0",        # Optional: Google Gemini
-
+    "anthropic>=0.45.0", # Default LLM provider
+    "openai>=1.30.0", # Optional: OpenAI GPT-4o
+    "google-genai>=1.0.0", # Optional: Google Gemini
     # === Vector Search & Embeddings ===
     "faiss-cpu>=1.7.4",
     "numpy>=1.24.0",
-    "requests>=2.31.0",           # For Ollama embeddings API
-
+    "requests>=2.31.0", # For Ollama embeddings API
     # === Code Parsing (AST) ===
     "tree-sitter>=0.23.0",
     "tree-sitter-python>=0.23.0",
     # Optional language parsers (install as needed):
     # tree-sitter-javascript, tree-sitter-typescript, tree-sitter-java
     # tree-sitter-rust, tree-sitter-go, tree-sitter-c, tree-sitter-cpp
-
     # === MCP Protocol ===
     "mcp>=1.0.0",
-
     # === Git ===
     "gitpython>=3.1.0",
-
     # === Terminal UI ===
     "rich>=13.0.0",
-
     # === Web / CORS ===
     "sse-starlette>=2.3.0",
+    "pdfplumber>=0.11.9",
+    "pymupdf>=1.27.1",
+    "unstructured>=0.20.8",
+    "clickhouse-connect>=0.13.0",
+    "sqlparse>=0.5.5",
+    "apscheduler>=3.11.2",
 ]
 
 [project.optional-dependencies]

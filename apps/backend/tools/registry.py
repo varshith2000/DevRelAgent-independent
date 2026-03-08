@@ -30,7 +30,7 @@ import asyncio
 import logging
 from typing import (
     Dict, Any, Callable, Optional, List,
-    Union, Awaitable, TypeVar, ParamSpec
+    Union, Awaitable, TypeVar, ParamSpec, Literal
 )
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -94,6 +94,10 @@ class ToolMetadata:
     timeout_seconds: int = 30
     async_executable: bool = False
     enabled: bool = True
+    requires_approval: bool = False
+    approval_action_type: Optional[str] = None
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
+    read_only: bool = True
 
 
 @dataclass
@@ -430,6 +434,11 @@ class ToolRegistry:
         handler: Callable,
         description: str = "",
         parameters: Optional[Dict[str, Dict[str, Any]]] = None,
+        requires_approval: bool = False,
+        approval_action_type: Optional[str] = None,
+        risk_level: Literal["low", "medium", "high", "critical"] = "low",
+        read_only: bool = True,
+        category: ToolCategory = ToolCategory.UTILITY,
         **kwargs
     ) -> None:
         """
@@ -440,14 +449,32 @@ class ToolRegistry:
             handler: Function to call
             description: Tool description
             parameters: Parameter definitions
+            requires_approval: Whether tool requires approval before execution
+            approval_action_type: Action type for approval (default: tool name)
+            risk_level: Risk level for approval (low/medium/high/critical)
+            read_only: Whether tool is read-only (no side effects)
+            category: Tool category
             **kwargs: Additional metadata
         """
+        # Add approval metadata to kwargs
+        kwargs.update({
+            "requires_approval": requires_approval,
+            "approval_action_type": approval_action_type,
+            "risk_level": risk_level,
+            "read_only": read_only
+        })
+
         tool = Tool(
             name=name,
             handler=handler,
             description=description,
             parameters=parameters,
-            metadata=ToolMetadata(name=name, description=description, **kwargs),
+            metadata=ToolMetadata(
+                name=name,
+                description=description,
+                category=category,
+                **kwargs
+            ),
         )
 
         self.register_tool(tool)
@@ -497,7 +524,7 @@ class ToolRegistry:
         timeout_seconds: Optional[int] = None,
     ) -> ToolExecutionResult:
         """
-        Execute a tool by name.
+        Execute a tool by name with automatic approval enforcement.
 
         Args:
             name: Tool name
@@ -522,6 +549,44 @@ class ToolRegistry:
                 success=False,
                 error=f"Tool '{name}' is disabled",
             )
+
+        # Automatic approval enforcement for write operations
+        if tool.metadata.requires_approval and not tool.metadata.read_only:
+            from guardrails.approval_guard import get_approval_guard
+
+            approval_guard = get_approval_guard()
+
+            # Auto-generate plan from tool description and arguments
+            plan = self._generate_approval_plan(tool, arguments)
+
+            # Request approval
+            try:
+                approval = await approval_guard.request_approval(
+                    action_type=tool.metadata.approval_action_type or name,
+                    plan=plan,
+                    metadata={
+                        "tool": name,
+                        "arguments": self._sanitize_arguments(arguments),
+                        "risk_level": tool.metadata.risk_level
+                    },
+                    timeout_seconds=timeout_seconds or tool.metadata.timeout_seconds
+                )
+
+                if not approval.approved:
+                    logger.info(f"Tool '{name}' execution rejected: {approval.reason}")
+                    return ToolExecutionResult(
+                        tool_name=name,
+                        success=False,
+                        error=f"Action not approved: {approval.reason or 'No reason provided'}",
+                    )
+
+            except Exception as e:
+                logger.error(f"Approval check failed for tool '{name}': {e}")
+                return ToolExecutionResult(
+                    tool_name=name,
+                    success=False,
+                    error=f"Approval check failed: {str(e)}",
+                )
 
         # Update stats
         self._execution_stats[name]["calls"] += 1
@@ -560,6 +625,94 @@ class ToolRegistry:
                 return tool.name
 
         return None
+
+    def _generate_approval_plan(self, tool: 'Tool', arguments: Dict[str, Any]) -> List[str]:
+        """
+        Generate step-by-step plan from tool metadata and arguments.
+
+        Args:
+            tool: Tool instance
+            arguments: Tool arguments
+
+        Returns:
+            List of plan steps
+        """
+        plan = [
+            f"Tool: {tool.name}",
+            f"Action: {tool.description}",
+            f"Risk Level: {tool.metadata.risk_level}",
+        ]
+
+        # Add category info
+        if tool.metadata.category != ToolCategory.UTILITY:
+            plan.append(f"Category: {tool.metadata.category.value}")
+
+        # Add argument details (sanitized)
+        if arguments:
+            plan.append("Parameters:")
+            for key, value in arguments.items():
+                # Sanitize sensitive values
+                if self._is_sensitive_parameter(key):
+                    plan.append(f"  {key}: [REDACTED]")
+                else:
+                    # Truncate long values
+                    value_str = str(value)
+                    if len(value_str) > 100:
+                        value_str = value_str[:100] + "..."
+                    plan.append(f"  {key}: {value_str}")
+
+        return plan
+
+    def _sanitize_arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sanitize arguments for logging/metadata by redacting sensitive values.
+
+        Args:
+            arguments: Original arguments
+
+        Returns:
+            Sanitized arguments dictionary
+        """
+        sanitized = {}
+        for key, value in arguments.items():
+            if self._is_sensitive_parameter(key):
+                sanitized[key] = "[REDACTED]"
+            elif isinstance(value, dict):
+                sanitized[key] = self._sanitize_arguments(value)
+            elif isinstance(value, list):
+                sanitized[key] = [
+                    self._sanitize_arguments({k: v}) if isinstance(v, dict) else v
+                    for v in value
+                ]
+            else:
+                # Truncate long values
+                value_str = str(value)
+                if len(value_str) > 200:
+                    sanitized[key] = value_str[:200] + "..."
+                else:
+                    sanitized[key] = value
+        return sanitized
+
+    def _is_sensitive_parameter(self, param_name: str) -> bool:
+        """
+        Check if a parameter name indicates sensitive data.
+
+        Args:
+            param_name: Parameter name to check
+
+        Returns:
+            True if parameter appears to be sensitive
+        """
+        sensitive_keywords = [
+            "password", "passwd", "pwd",
+            "token", "api_key", "apikey", "api-key",
+            "secret", "private_key", "private-key",
+            "credential", "auth",
+            "session", "cookie"
+        ]
+
+        param_lower = param_name.lower()
+        return any(keyword in param_lower for keyword in sensitive_keywords)
 
     def get_openai_schemas(self, **kwargs) -> List[dict]:
         """Get all tools as OpenAI function schemas."""
@@ -609,17 +762,46 @@ def tool(
     description: str = "",
     parameters: Optional[Dict[str, Dict[str, Any]]] = None,
     category: ToolCategory = ToolCategory.UTILITY,
+    requires_approval: bool = False,
+    approval_action_type: Optional[str] = None,
+    risk_level: Literal["low", "medium", "high", "critical"] = "low",
+    read_only: bool = True,
     **kwargs
 ):
     """
     Convenience decorator for registering tools.
 
     Usage:
-        @tool(name="my_tool", description="Does something")
+        @tool(
+            name="my_tool",
+            description="Does something",
+            requires_approval=False,
+            read_only=True
+        )
         def my_function(arg1: str):
             return {"result": "done"}
+
+    Args:
+        name: Tool name (default: function name)
+        description: Tool description
+        parameters: Parameter definitions in OpenAI schema format
+        category: Tool category
+        requires_approval: Whether tool requires approval before execution
+        approval_action_type: Action type for approval (default: tool name)
+        risk_level: Risk level for approval (low/medium/high/critical)
+        read_only: Whether tool is read-only (no side effects)
+        **kwargs: Additional metadata
     """
     registry = get_registry()
+
+    # Add approval metadata to kwargs
+    kwargs.update({
+        "requires_approval": requires_approval,
+        "approval_action_type": approval_action_type,
+        "risk_level": risk_level,
+        "read_only": read_only
+    })
+
     return registry.register(
         name=name,
         description=description,

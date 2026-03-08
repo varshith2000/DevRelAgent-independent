@@ -1,8 +1,28 @@
 """
-Skills Package — Composable multi-tool workflows
+Skills Framework — Composable multi-tool workflows
 
-TODO: Phase 2 implementation
-- DiagnoseErrorSkill: KeDB → Logs → Code → Summary
-- SearchDocsSkill: Multi-source doc search
-- CreatePatchSkill: Code fix → PR workflow
+Skills chain multiple tools together to accomplish complex tasks.
 """
+
+from .base import Skill, SkillResult, SkillRegistry, get_skill_registry, skill
+from .diagnose_error import DiagnoseErrorSkill
+from .search_docs import SearchDocsSkill
+
+# Initialize skills
+_diagnose_error_skill = DiagnoseErrorSkill()
+_search_docs_skill = SearchDocsSkill()
+
+# Register skills
+registry = get_skill_registry()
+registry.register(_diagnose_error_skill)
+registry.register(_search_docs_skill)
+
+__all__ = [
+    'Skill',
+    'SkillResult', 
+    'SkillRegistry',
+    'get_skill_registry',
+    'skill',
+    'DiagnoseErrorSkill',
+    'SearchDocsSkill'
+]

@@ -218,7 +218,13 @@ class AgentLoop:
             if tool_name:
                 yield {"type": "routing", "tool": tool_name}
 
-            # 3. Execute tool
+            # 3. Explain before act
+            if tool_name and self.enable_tools:
+                explanation = await self._explain_before_act(tool_name, perception, session)
+                if explanation:
+                    yield {"type": "explanation", "explanation": explanation}
+
+            # 4. Execute tool
             tool_result = None
             if tool_name and self.enable_tools:
                 yield {"type": "tool_start", "tool_name": tool_name}
@@ -234,6 +240,20 @@ class AgentLoop:
                         "error": tool_result.error,
                     } if tool_result else {}
                 }
+
+            # 5. Stream response generation
+            full_response = ""
+            async for token in self._generate_response_stream(
+                user_input,
+                perception,
+                tool_result,
+                session,
+            ):
+                full_response += token
+                yield {"type": "token", "content": token}
+
+            # Done
+            yield {"type": "done", "response": full_response}
 
             # 4. Stream response generation
             full_response = ""
@@ -321,20 +341,30 @@ class AgentLoop:
         session: Optional[SessionContext],
     ) -> Optional[str]:
         """
-        Route intent to appropriate tool.
+        Route intent to appropriate tool or skill.
 
-        Uses the router to classify and the registry to find tools.
+        Uses the router to classify and the registry to find tools/skills.
         """
         if not self.enable_tools:
             return None
 
-        # First, use tool hint from perception
+        # First, check for skill routing
+        from skills import get_skill_registry
+        skill_registry = get_skill_registry()
+        
+        skill_name = skill_registry.route_by_intent(perception.intent)
+        if skill_name:
+            skill = skill_registry.get(skill_name)
+            if skill:
+                return f"skill:{skill_name}"
+
+        # Then, use tool hint from perception
         if perception.tool_hint:
             tool = self.registry.get(perception.tool_hint)
             if tool and tool.metadata.enabled:
                 return perception.tool_hint
 
-        # Fallback to intent-based routing
+        # Fallback to intent-based routing for tools
         tool_name = self.registry.route_by_intent(perception.intent)
         if tool_name:
             tool = self.registry.get(tool_name)
@@ -350,16 +380,20 @@ class AgentLoop:
         session: Optional[SessionContext],
     ) -> Optional[ToolCallResult]:
         """
-        Execute a tool with arguments derived from perception.
+        Execute a tool or skill with arguments derived from perception.
 
         Args:
-            tool_name: Name of tool to execute
+            tool_name: Name of tool/skill to execute (prefixed with 'skill:' for skills)
             perception: Perception result with entities
             session: Optional session context
 
         Returns:
             ToolCallResult or None
         """
+        # Check if this is a skill execution
+        if tool_name.startswith("skill:"):
+            return await self._execute_skill(tool_name[6:], perception, session)
+        
         tool = self.registry.get(tool_name)
         if not tool:
             logger.warning(f"Tool not found: {tool_name}")
@@ -375,6 +409,12 @@ class AgentLoop:
                 arguments,
                 timeout_seconds=30,
             )
+            
+            # SQL Self-Correction for ClickHouse queries
+            if tool_name == "clickhouse_query" and not execution_result.success:
+                execution_result = await self._retry_sql_with_correction(
+                    tool_name, arguments, execution_result.error
+                )
 
             return ToolCallResult(
                 tool_name=tool_name,
@@ -393,6 +433,185 @@ class AgentLoop:
                 success=False,
                 error=str(e),
             )
+    
+    async def _execute_skill(
+        self,
+        skill_name: str,
+        perception: PerceptionResult,
+        session: Optional[SessionContext],
+    ) -> Optional[ToolCallResult]:
+        """
+        Execute a skill with arguments derived from perception.
+
+        Args:
+            skill_name: Name of skill to execute
+            perception: Perception result with entities
+            session: Optional session context
+
+        Returns:
+            ToolCallResult or None
+        """
+        from skills import get_skill_registry
+        
+        skill_registry = get_skill_registry()
+        skill = skill_registry.get(skill_name)
+        
+        if not skill:
+            logger.warning(f"Skill not found: {skill_name}")
+            return None
+
+        # Build skill context and arguments
+        context = {
+            "tool_registry": self.registry,
+            "session": session,
+            "perception": perception
+        }
+        
+        # Build skill-specific arguments
+        kwargs = {}
+        
+        if skill_name == "diagnose_error":
+            kwargs = {
+                "error_description": perception.user_input,
+                "service_name": next((e.value for e in perception.entities if e.type == "service"), ""),
+                "time_range": "1h"
+            }
+        elif skill_name == "search_docs":
+            kwargs = {
+                "query": perception.user_input,
+                "sources": ["docs", "web"],
+                "max_results": 3
+            }
+
+        # Execute skill
+        try:
+            skill_result = await skill.execute(context, **kwargs)
+
+            return ToolCallResult(
+                tool_name=f"skill:{skill_name}",
+                arguments=kwargs,
+                result=skill_result.result if skill_result.success else None,
+                success=skill_result.success,
+                error=skill_result.error,
+                metadata={
+                    "skill_steps": skill_result.steps,
+                    "skill_metadata": skill_result.metadata
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Skill execution failed: {e}")
+            return ToolCallResult(
+                tool_name=f"skill:{skill_name}",
+                arguments=kwargs,
+                result=None,
+                success=False,
+                error=str(e),
+            )
+    async def _retry_sql_with_correction(
+        self,
+        tool_name: str,
+        original_arguments: Dict[str, Any],
+        error_message: str,
+        max_retries: int = 3
+    ):
+        """
+        Retry SQL query with LLM-based error correction.
+
+        Args:
+            tool_name: Name of the SQL tool
+            original_arguments: Original arguments that failed
+            error_message: Error message from failed execution
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            ToolExecutionResult with corrected query or final error
+        """
+        from tools.registry import ToolExecutionResult
+
+        for attempt in range(max_retries):
+            logger.info(f"SQL correction attempt {attempt + 1}/{max_retries}")
+
+            try:
+                # Use LLM to correct the SQL based on error
+                corrected_query = await self._correct_sql_with_llm(
+                    original_arguments.get("natural_query", ""),
+                    error_message
+                )
+
+                if not corrected_query:
+                    continue
+
+                # Update arguments with corrected query
+                corrected_arguments = original_arguments.copy()
+                corrected_arguments["natural_query"] = corrected_query
+
+                # Retry execution
+                result = await self.registry.execute_tool(
+                    tool_name,
+                    corrected_arguments,
+                    timeout_seconds=30,
+                )
+
+                if result.success:
+                    logger.info(f"SQL correction successful on attempt {attempt + 1}")
+                    # Add metadata about correction
+                    if hasattr(result, 'result') and isinstance(result.result, dict):
+                        result.result["sql_corrected"] = True
+                        result.result["correction_attempts"] = attempt + 1
+                    return result
+                else:
+                    error_message = result.error  # Update error for next attempt
+
+            except Exception as e:
+                logger.error(f"SQL correction attempt {attempt + 1} failed: {e}")
+                error_message = str(e)
+
+        # All retries failed
+        return ToolExecutionResult(
+            success=False,
+            result=None,
+            error=f"SQL correction failed after {max_retries} attempts. Last error: {error_message}"
+        )
+
+    async def _correct_sql_with_llm(self, natural_query: str, error_message: str) -> Optional[str]:
+        """
+        Use LLM to correct SQL based on error message.
+
+        Args:
+            natural_query: Original natural language query
+            error_message: SQL error message
+
+        Returns:
+            Corrected natural language query or None
+        """
+        try:
+            correction_prompt = f"""
+            The following natural language query failed when converted to SQL:
+            Query: "{natural_query}"
+            Error: {error_message}
+
+            Please provide a corrected version of the natural language query that would avoid this error.
+            Consider common SQL issues like:
+            - Wrong column names
+            - Missing table aliases
+            - Incorrect syntax
+            - Data type mismatches
+
+            Respond with only the corrected natural language query, nothing else.
+            """
+
+            # Use the LLM provider to get correction
+            if hasattr(self, 'llm_provider') and self.llm_provider:
+                response = await self.llm_provider.generate_response(correction_prompt)
+                if response and response.strip():
+                    return response.strip()
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error correcting SQL with LLM: {e}")
+            return None
 
     def _build_tool_arguments(
         self,
@@ -563,3 +782,198 @@ class AgentLoop:
         """Clear conversation history."""
         self.conversation_history.clear()
         logger.info("Conversation history cleared")
+
+    async def _explain_before_act(
+        self,
+        tool_name: str,
+        perception: PerceptionResult,
+        session: Optional[SessionContext]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate explanation before tool execution.
+
+        Args:
+            tool_name: Name of tool to be executed
+            perception: Perception result with user input and entities
+            session: Optional session context
+
+        Returns:
+            Tool explanation dictionary or None
+        """
+        from models.schemas import ToolExplanation
+
+        tool = self.registry.get(tool_name)
+        if not tool:
+            return None
+
+        # Build tool arguments
+        arguments = self._build_tool_arguments(tool_name, perception, session)
+
+        # Generate explanation
+        explanation = ToolExplanation(
+            tool_name=tool_name,
+            action=tool.description,
+            parameters=arguments,
+            reasoning=self._generate_reasoning(tool, perception),
+            expected_outcome=self._predict_outcome(tool, perception),
+            requires_approval=tool.metadata.requires_approval,
+            risk_level=tool.metadata.risk_level if tool.metadata.requires_approval else None,
+            confidence=0.8
+        )
+
+        return explanation.dict()
+
+    def _generate_reasoning(self, tool: Any, perception: PerceptionResult) -> str:
+        """
+        Generate reasoning for why this tool is needed.
+
+        Args:
+            tool: Tool instance
+            perception: Perception result
+
+        Returns:
+            Reasoning string
+        """
+        reasoning_parts = [
+            f"Tool '{tool.name}' was selected based on the user's intent: {perception.intent}",
+        ]
+
+        if perception.entities:
+            reasoning_parts.append(f"Detected entities: {', '.join(str(e) for e in perception.entities)}")
+
+        reasoning_parts.append(f"Tool category: {tool.metadata.category.value}")
+        reasoning_parts.append(f"Tool description: {tool.description}")
+
+        return ". ".join(reasoning_parts)
+
+    def _predict_outcome(self, tool: Any, perception: PerceptionResult) -> str:
+        """
+        Predict what the tool will return.
+
+        Args:
+            tool: Tool instance
+            perception: Perception result
+
+        Returns:
+            Predicted outcome string
+        """
+        category = tool.metadata.category.value
+
+        predictions = {
+            "database_query": "Query results with data from the database",
+            "code_search": "Relevant code snippets matching the search query",
+            "document_search": "Relevant documentation sections",
+            "api": "API response with operation results",
+            "system": "System operation result"
+        }
+
+        base_prediction = predictions.get(category, "Operation result")
+
+        if tool.metadata.requires_approval:
+            base_prediction += " (pending user approval)"
+
+        return base_prediction
+    async def _retry_sql_with_correction(
+        self,
+        tool_name: str,
+        original_arguments: Dict[str, Any],
+        error_message: str,
+        max_retries: int = 3
+    ):
+        """
+        Retry SQL query with LLM-based error correction.
+        
+        Args:
+            tool_name: Name of the SQL tool
+            original_arguments: Original arguments that failed
+            error_message: Error message from failed execution
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            ToolExecutionResult with corrected query or final error
+        """
+        from tools.registry import ToolExecutionResult
+        
+        for attempt in range(max_retries):
+            logger.info(f"SQL correction attempt {attempt + 1}/{max_retries}")
+            
+            try:
+                # Use LLM to correct the SQL based on error
+                corrected_query = await self._correct_sql_with_llm(
+                    original_arguments.get("natural_query", ""),
+                    error_message
+                )
+                
+                if not corrected_query:
+                    continue
+                
+                # Update arguments with corrected query
+                corrected_arguments = original_arguments.copy()
+                corrected_arguments["natural_query"] = corrected_query
+                
+                # Retry execution
+                result = await self.registry.execute_tool(
+                    tool_name,
+                    corrected_arguments,
+                    timeout_seconds=30,
+                )
+                
+                if result.success:
+                    logger.info(f"SQL correction successful on attempt {attempt + 1}")
+                    # Add metadata about correction
+                    if hasattr(result, 'result') and isinstance(result.result, dict):
+                        result.result["sql_corrected"] = True
+                        result.result["correction_attempts"] = attempt + 1
+                    return result
+                else:
+                    error_message = result.error  # Update error for next attempt
+                    
+            except Exception as e:
+                logger.error(f"SQL correction attempt {attempt + 1} failed: {e}")
+                error_message = str(e)
+        
+        # All retries failed
+        return ToolExecutionResult(
+            success=False,
+            result=None,
+            error=f"SQL correction failed after {max_retries} attempts. Last error: {error_message}"
+        )
+    
+    async def _correct_sql_with_llm(self, natural_query: str, error_message: str) -> Optional[str]:
+        """
+        Use LLM to correct SQL based on error message.
+        
+        Args:
+            natural_query: Original natural language query
+            error_message: SQL error message
+            
+        Returns:
+            Corrected natural language query or None
+        """
+        try:
+            correction_prompt = f"""
+            The following natural language query failed when converted to SQL:
+            Query: "{natural_query}"
+            Error: {error_message}
+            
+            Please provide a corrected version of the natural language query that would avoid this error.
+            Consider common SQL issues like:
+            - Wrong column names
+            - Missing table aliases
+            - Incorrect syntax
+            - Data type mismatches
+            
+            Respond with only the corrected natural language query, nothing else.
+            """
+            
+            # Use the LLM provider to get correction
+            if hasattr(self, 'llm_provider') and self.llm_provider:
+                response = await self.llm_provider.generate_response(correction_prompt)
+                if response and response.strip():
+                    return response.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error correcting SQL with LLM: {e}")
+            return None

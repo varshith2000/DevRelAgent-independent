@@ -1,0 +1,111 @@
+# OpenTelemetry Collector Configuration for DevRelAgent
+# This configuration receives traces, metrics, and logs from your services
+# and exports them to ClickHouse for querying by DevRelAgent
+
+receivers:
+  # OTLP receiver - accepts data from OpenTelemetry SDKs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver for scraping metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8889']
+
+  # Jaeger receiver for legacy Jaeger compatibility
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+
+processors:
+  # Batch traces/metrics/logs before sending to exporter
+  batch:
+    timeout: 5s
+    send_batch_size: 10000
+
+  # Memory limits to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Add resource attributes (service name, environment)
+  resource:
+    attributes:
+      - key: collector.name
+        value: devrelagent-otel-collector
+      - key: environment
+        value: production
+
+exporters:
+  # ClickHouse exporter for traces
+  clickhousetraces:
+    endpoint: tcp://clickhouse:9000
+    database: logs
+    table: otel_traces
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # ClickHouse exporter for metrics
+  clickhousemetrics:
+    endpoint: tcp://clickhouse:9000
+    database: logs
+    table: otel_metrics
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+
+  # ClickHouse exporter for logs
+  clickhouselogs:
+    endpoint: tcp://clickhouse:9000
+    database: logs
+    table: otel_logs
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+
+  # Debug logging (optional, for troubleshooting)
+  logging:
+    loglevel: info
+
+service:
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp, jaeger]
+      processors: [memory_limiter, batch, resource]
+      exporters: [clickhousetraces, logging]
+
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch, resource]
+      exporters: [clickhousemetrics, logging]
+
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [clickhouselogs, logging]
+
+  # Telemetry for the collector itself
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8889
+    logs:
+      level: info

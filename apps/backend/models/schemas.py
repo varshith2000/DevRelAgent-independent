@@ -185,7 +185,7 @@ class ChatStreamChunk(BaseModel):
     tool_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     session_id: str
-    explanation: Optional[ToolExplanation] = None
+    explanation: Optional['ToolExplanation'] = None  # Forward reference
 
 
 class SessionContext(BaseModel):

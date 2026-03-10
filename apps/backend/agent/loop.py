@@ -650,9 +650,11 @@ class AgentLoop:
             if perception.repo_url:
                 arguments["repo_url"] = perception.repo_url
 
-        # Add session context if available
+        # Add session context if available AND if the tool accepts it
         if session:
-            arguments["session_id"] = session.session_id
+            tool = self.registry.get(tool_name)
+            if tool and "session_id" in tool.parameters:
+                arguments["session_id"] = session.session_id
 
         return arguments
 

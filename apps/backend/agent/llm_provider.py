@@ -88,6 +88,9 @@ class GeminiProvider(LLMProvider):
         super().__init__(model)
         from google import genai
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        # Ensure model name has the correct prefix for the GenAI SDK
+        if not model.startswith("models/"):
+            self.model = f"models/{model}"
 
     def generate(self, prompt: str, max_tokens: int = 1000, system: Optional[str] = None) -> str:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt

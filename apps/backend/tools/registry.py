@@ -229,19 +229,36 @@ class Tool:
             if missing_params:
                 raise ValueError(f"Missing required parameters: {missing_params}")
 
+            # Filter out unexpected arguments to avoid TypeError
+            # Only pass arguments that the handler accepts
+            import inspect
+            sig = inspect.signature(self.handler)
+            valid_params = set(sig.parameters.keys())
+
+            # Keep only arguments that are in the handler's signature
+            filtered_arguments = {
+                k: v for k, v in arguments.items()
+                if k in valid_params
+            }
+
+            # Log if we filtered any arguments (for debugging)
+            if len(filtered_arguments) < len(arguments):
+                filtered_keys = set(arguments.keys()) - set(filtered_arguments.keys())
+                logger.debug(f"Tool {self.name}: Filtered unexpected parameters: {filtered_keys}")
+
             # Execute with timeout
             timeout = timeout_seconds or self.metadata.timeout_seconds
 
             if self.is_async:
                 result = await asyncio.wait_for(
-                    self.handler(**arguments),
+                    self.handler(**filtered_arguments),
                     timeout=timeout,
                 )
             else:
                 # Run sync function in executor to avoid blocking
                 loop = asyncio.get_event_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: self.handler(**arguments)),
+                    loop.run_in_executor(None, lambda: self.handler(**filtered_arguments)),
                     timeout=timeout,
                 )
 

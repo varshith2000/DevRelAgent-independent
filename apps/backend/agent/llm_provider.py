@@ -20,12 +20,13 @@ load_dotenv()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001")
 
-# Gemini 3 free models
-GEMINI_3_MODELS = [
-    "gemini-2.0-flash-exp",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b"
+# Supported Gemini models (free and paid)
+GEMINI_MODELS = [
+    "gemini-2.5",           # Latest Gemini 2.5 (recommended)
+    "gemini-2.0-flash-exp", # Gemini 2.0 Flash Experimental
+    "gemini-1.5-pro",       # Gemini 1.5 Pro
+    "gemini-1.5-flash",     # Gemini 1.5 Flash
+    "gemini-1.5-flash-8b"   # Gemini 1.5 Flash 8B (lightweight)
 ]
 
 

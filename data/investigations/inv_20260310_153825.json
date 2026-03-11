@@ -1,0 +1,29 @@
+{
+  "investigation_id": "inv_20260310_153825",
+  "title": "\"Showtables\"",
+  "description": "CLI investigation: \"Showtables\"",
+  "started_at": "2026-03-10T15:38:25.359868",
+  "updated_at": "2026-03-10T15:38:28.183142",
+  "completed_at": "2026-03-10T15:38:28.183142",
+  "status": "completed",
+  "priority": "medium",
+  "initial_query": "\"Showtables\"",
+  "services_involved": [],
+  "time_range_start": null,
+  "time_range_end": null,
+  "observations": [],
+  "total_observations": 0,
+  "actions_taken": [],
+  "pending_actions": [],
+  "root_cause": null,
+  "resolution": null,
+  "resolution_status": null,
+  "tools_used": [
+    "clickhouse_query"
+  ],
+  "queries_executed": 1,
+  "confidence_score": 0.0,
+  "assigned_to": null,
+  "tags": [],
+  "metadata": {}
+}

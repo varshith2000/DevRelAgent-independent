@@ -244,7 +244,9 @@ class Tool:
             # Log if we filtered any arguments (for debugging)
             if len(filtered_arguments) < len(arguments):
                 filtered_keys = set(arguments.keys()) - set(filtered_arguments.keys())
-                logger.debug(f"Tool {self.name}: Filtered unexpected parameters: {filtered_keys}")
+                logger.warning(f"Tool {self.name}: Filtered unexpected parameters: {filtered_keys}")
+                logger.debug(f"Tool {self.name}: Handler signature params: {valid_params}")
+                logger.debug(f"Tool {self.name}: Provided arguments: {set(arguments.keys())}")
 
             # Execute with timeout
             timeout = timeout_seconds or self.metadata.timeout_seconds

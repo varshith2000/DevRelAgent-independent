@@ -301,7 +301,8 @@ class AgentLoop:
 
         elif any(w in user_lower for w in [
             "database", "query", "sql", "logs", "metrics",
-            "recent", "errors", "show me", "count", "statistics", "data"
+            "recent", "errors", "show me", "show", "count", "statistics", "data",
+            "tables", "columns", "rows"
         ]):
             intent = "database_query"
             tool_hint = "clickhouse_query"
@@ -628,6 +629,9 @@ class AgentLoop:
                 arguments["natural_query"] = perception.entities[0]
             else:
                 arguments["natural_query"] = perception.user_input
+            # IMPORTANT: clickhouse_query does NOT accept session_id
+            # Never add it regardless of session context
+            return arguments
 
         # Handle code search
         elif tool_name == "code_search":
@@ -650,11 +654,23 @@ class AgentLoop:
             if perception.repo_url:
                 arguments["repo_url"] = perception.repo_url
 
-        # Add session context if available AND if the tool accepts it
+        # Add session context ONLY for tools that explicitly support it
+        # Most tools (including clickhouse_query) do NOT need session_id
         if session:
             tool = self.registry.get(tool_name)
-            if tool and "session_id" in tool.parameters:
-                arguments["session_id"] = session.session_id
+            # Only add session_id if the tool explicitly declares it as a parameter
+            if tool and tool.parameters:
+                param_names = list(tool.parameters.keys())
+                logger.debug(f"Tool {tool_name} parameters: {param_names}")
+                if "session_id" in tool.parameters:
+                    arguments["session_id"] = session.session_id
+                    logger.debug(f"Tool {tool_name} accepts session_id parameter")
+                else:
+                    # Explicitly ensure session_id is NOT in arguments
+                    arguments.pop("session_id", None)
+            elif tool:
+                # No parameters defined - don't add session_id
+                arguments.pop("session_id", None)
 
         return arguments
 
@@ -688,8 +704,11 @@ class AgentLoop:
                         f"Tool '{tool_result.tool_name}' returned: {self._format_tool_result(tool_result.result)}"
                     )
                 else:
+                    # Provide clear error context to LLM
+                    error_msg = tool_result.error or "Unknown error"
                     context_parts.append(
-                        f"Tool '{tool_result.tool_name}' failed: {tool_result.error}"
+                        f"Tool '{tool_result.tool_name}' failed with error: {error_msg}. "
+                        f"Arguments passed: {list(tool_result.arguments.keys()) if tool_result.arguments else 'none'}."
                     )
 
             # Add conversation history context

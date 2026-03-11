@@ -51,7 +51,8 @@ class ClickHouseClient:
             Query result
         """
         try:
-            result = self._client.query(query, parameters)
+            # Pass parameters as keyword argument (not positional)
+            result = self._client.query(query, parameters=parameters)
             return result
         except Exception as e:
             logger.error(f"Query failed: {e}")

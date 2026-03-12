@@ -501,8 +501,7 @@ async def list_grafana_datasources() -> Dict[str, Any]:
     name="create_service_dashboard",
     description="Create Grafana dashboard for a service with error rate, latency, availability metrics",
     category=ToolCategory.API,
-    requires_approval=True,
-    approval_action_type="grafana_dashboard",
+    requires_approval=False,
     read_only=False,
     risk_level="low"
 )
@@ -584,8 +583,7 @@ async def create_service_dashboard(
     name="create_multi_service_dashboard",
     description="Create Grafana dashboard comparing multiple services",
     category=ToolCategory.API,
-    requires_approval=True,
-    approval_action_type="grafana_dashboard",
+    requires_approval=False,
     read_only=False,
     risk_level="low"
 )
@@ -702,8 +700,7 @@ async def export_dashboard_json(
     name="import_dashboard_json",
     description="Import Grafana dashboard from JSON file",
     category=ToolCategory.API,
-    requires_approval=True,
-    approval_action_type="grafana_dashboard",
+    requires_approval=False,
     read_only=False,
     risk_level="low"
 )
@@ -936,3 +933,100 @@ set GRAFANA_DEFAULT_DATASOURCE=ClickHouse
             }
         }
     }
+
+
+@tool(
+    name="create_grafana_dashboard",
+    description="Create a Grafana dashboard from natural language description. Parses query to extract dashboard title and parameters. Can create system-wide or service-specific dashboards.",
+    category=ToolCategory.API,
+    requires_approval=False,
+    read_only=False,
+    risk_level="low"
+)
+async def create_grafana_dashboard(
+    natural_query: str,
+    dashboard_title: str = None,
+    service_name: str = None,
+    datasource_name: str = None
+) -> Dict[str, Any]:
+    """
+    Create a Grafana dashboard from natural language description.
+
+    This function parses the natural language query to extract:
+    - Dashboard title (from "called 'X'" or "named 'X'")
+    - Service name (if mentioned)
+    - Uses sensible defaults if not specified
+
+    Args:
+        natural_query: Natural language description of the dashboard
+        dashboard_title: Optional dashboard title (overrides parsed value)
+        service_name: Optional service name (overrides parsed value)
+        datasource_name: Optional datasource name (default: GRAFANA_DEFAULT_DATASOURCE)
+
+    Returns:
+        Dashboard creation result with URL
+    """
+    import re
+
+    if not natural_query:
+        return {
+            "success": False,
+            "error": "natural_query parameter is required"
+        }
+
+    query_lower = natural_query.lower()
+
+    # Parse dashboard title from query (if not provided)
+    if not dashboard_title:
+        # Pattern 1: "called 'Dashboard Name'"
+        match = re.search(r"called\s+['\"]([^'\"]+)['\"]", natural_query, re.IGNORECASE)
+        if match:
+            dashboard_title = match.group(1)
+        else:
+            # Pattern 2: "named 'Dashboard Name'"
+            match = re.search(r"named\s+['\"]([^'\"]+)['\"]", natural_query, re.IGNORECASE)
+            if match:
+                dashboard_title = match.group(1)
+            else:
+                # Pattern 3: "for [Purpose]"
+                if "critical errors" in query_lower:
+                    dashboard_title = "Critical Errors Monitor"
+                elif "error rate" in query_lower:
+                    dashboard_title = "Error Rate Dashboard"
+                elif "service health" in query_lower:
+                    dashboard_title = "Service Health Dashboard"
+                else:
+                    dashboard_title = "DevRelAgent Dashboard"
+
+    # Parse service name from query (if not provided)
+    if not service_name:
+        # Check if a specific service is mentioned
+        services = ["api", "database", "cache", "auth", "worker", "frontend"]
+        mentioned_services = [s for s in services if s in query_lower]
+
+        if mentioned_services:
+            service_name = mentioned_services[0]
+        else:
+            # Use "all" for system-wide dashboards
+            service_name = "all"
+
+    # Use default datasource (if not provided)
+    datasource = datasource_name or GRAFANA_DEFAULT_DATASOURCE
+
+    # If service_name is "all", create a multi-service dashboard
+    if service_name == "all":
+        # Create dashboard for all services
+        all_services = ["api", "database", "cache", "auth", "worker", "frontend"]
+        return await create_multi_service_dashboard(
+            service_names=all_services,
+            datasource_name=datasource,
+            dashboard_title=dashboard_title
+        )
+    else:
+        # Create single service dashboard
+        return await create_service_dashboard(
+            service_name=service_name,
+            datasource_name=datasource,
+            dashboard_title=dashboard_title,
+            auto_provision=False
+        )

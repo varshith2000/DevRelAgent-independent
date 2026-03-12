@@ -209,33 +209,17 @@ class AgentLoop:
                 tools_failed.append(f"draft_github_issue: {e}")
                 logger.warning(f"[WARNING] Failed to register draft_github_issue tool: {e}")
         
-        # 3. Register Grafana dashboard tools
+        # 3. Import Grafana tools to trigger @tool decorator registration
         if "create_grafana_dashboard" not in self.registry.tool_names:
             try:
-                from tools.grafana_tool import create_service_dashboard, test_grafana_connection
-                
-                self.registry.register_manual(
-                    name="create_grafana_dashboard",
-                    handler=create_service_dashboard,
-                    description="Create a Grafana dashboard for a service with monitoring panels (requires HITL approval)",
-                    parameters={
-                        "service_name": {"type": "string", "description": "Name of the service to monitor"},
-                        "datasource_name": {"type": "string", "description": "Grafana datasource name"},
-                        "dashboard_title": {"type": "string", "description": "Dashboard title"}
-                    },
-                    category=ToolCategory.API,
-                    requires_approval=True,
-                    approval_action_type="grafana_dashboard",
-                    read_only=False,
-                    risk_level="low",
-                )
+                # Import the module to trigger @tool decorator registration
+                from tools import grafana_tool
                 tools_registered.append("create_grafana_dashboard")
                 logger.info("[OK] Registered create_grafana_dashboard tool")
-                
             except Exception as e:
                 tools_failed.append(f"create_grafana_dashboard: {e}")
                 logger.warning(f"[WARNING] Failed to register create_grafana_dashboard tool: {e}")
-        
+
         # 4. Register code search tools (if repos are indexed)
         if "search_code" not in self.registry.tool_names:
             try:
@@ -552,6 +536,16 @@ class AgentLoop:
         elif any(w in user_lower for w in ["index", "build index"]):
             intent = "index_repo"
             tool_hint = "index_repository"
+
+        # Check for dashboard creation BEFORE database_query
+        # This ensures "Create a dashboard" queries are routed correctly
+        elif any(w in user_lower for w in [
+            "dashboard", "grafana", "panel", "visualization", "visualize",
+            "create dashboard", "build dashboard", "setup dashboard"
+        ]):
+            intent = "dashboard_management"
+            tool_hint = "create_grafana_dashboard"
+            entities = [user_input]
 
         elif any(w in user_lower for w in [
             "database", "query", "sql", "logs", "metrics",
@@ -901,9 +895,16 @@ class AgentLoop:
         kwargs = {}
         
         if skill_name == "diagnose_error":
+            # entities is List[str], not objects with .type and .value
+            # Try to find a service name in entities, or use empty string
+            service_name = ""
+            if perception.entities:
+                # Use the first entity as service name, or look for common service patterns
+                service_name = next((e for e in perception.entities if len(e) > 0), perception.entities[0])
+
             kwargs = {
                 "error_description": perception.user_input,
-                "service_name": next((e.value for e in perception.entities if e.type == "service"), ""),
+                "service_name": service_name,
                 "time_range": "1h"
             }
         elif skill_name == "search_docs":
@@ -1082,6 +1083,11 @@ class AgentLoop:
         elif tool_name == "clone_repository":
             if perception.repo_url:
                 arguments["repo_url"] = perception.repo_url
+
+        # Handle Grafana dashboard creation
+        elif tool_name == "create_grafana_dashboard":
+            # Pass the full user query as natural_query parameter
+            arguments["natural_query"] = perception.user_input
 
         # Add session context ONLY for tools that explicitly support it
         # Most tools (including clickhouse_query) do NOT need session_id

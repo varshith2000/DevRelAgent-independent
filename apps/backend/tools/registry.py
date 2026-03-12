@@ -176,6 +176,11 @@ class Tool:
         """Extract parameter definitions from function signature."""
         sig = inspect.signature(self.handler)
 
+        # Debug logging
+        logger.info(f"Extracting parameters for tool '{self.name}'")
+        logger.info(f"Function signature: {sig}")
+        logger.info(f"Function parameters: {list(sig.parameters.keys())}")
+
         for param_name, param in sig.parameters.items():
             if param_name == "self":
                 continue
@@ -194,6 +199,8 @@ class Tool:
 
             required = param.default == inspect.Parameter.empty
             default = None if required else param.default
+
+            logger.info(f"  Parameter '{param_name}': type={param_type}, required={required}, default={default}")
 
             self.parameters[param_name] = ToolParameter(
                 name=param_name,
@@ -227,6 +234,10 @@ class Tool:
             ]
 
             if missing_params:
+                logger.error(f"Tool {self.name} - Missing required parameters: {missing_params}")
+                logger.error(f"Tool {self.name} - Available parameters: {list(self.parameters.keys())}")
+                logger.error(f"Tool {self.name} - Required parameters: {[name for name, param in self.parameters.items() if param.required]}")
+                logger.error(f"Tool {self.name} - Provided arguments: {list(arguments.keys())}")
                 raise ValueError(f"Missing required parameters: {missing_params}")
 
             # Filter out unexpected arguments to avoid TypeError
@@ -362,7 +373,8 @@ class ToolRegistry:
     INTENT_KEYWORDS: Dict[str, List[str]] = {
         "code_search": [
             "search code", "find code", "code", "function", "class",
-            "implementation", "how does", "where is", "locate"
+            "implementation", "how does", "where is", "locate",
+            "source code", "repository", "show me the"
         ],
         "document_search": [
             "search docs", "documentation", "readme", "guide", "how to",
@@ -370,7 +382,8 @@ class ToolRegistry:
         ],
         "clickhouse_query": [
             "database", "query", "sql", "logs", "metrics", "recent",
-            "errors", "show me", "count", "statistics", "data"
+            "error rate", "latency", "performance data", "observability",
+            "clickhouse", "monitoring data"
         ],
     }
 
@@ -630,18 +643,28 @@ class ToolRegistry:
         Returns:
             Tool name or None
         """
-        intent_lower = intent.lower()
+        # Direct intent to tool mapping (priority order)
+        INTENT_TO_TOOL = {
+            "search_code": "search_code",
+            "database_query": "clickhouse_query",
+            "document_search": "rag_search",
+            "incident_investigation": "get_error_rate",
+            "gap_detection": "detect_documentation_gaps",
+            "config_generation": "generate_config",
+            "dashboard_management": "create_grafana_dashboard",
+            "ticket_management": "draft_github_issue",
+            "status_check": "get_error_rate",
+        }
 
-        # Check registered intent mappings
-        for tool_name, keywords in self.INTENT_KEYWORDS.items():
-            if any(kw in intent_lower for kw in keywords):
-                if tool_name in self._tools:
-                    return tool_name
+        # First try direct mapping
+        if intent in INTENT_TO_TOOL:
+            tool_name = INTENT_TO_TOOL[intent]
+            if tool_name in self._tools:
+                return tool_name
 
-        # Fallback: check tool descriptions
-        for tool in self._tools.values():
-            if any(kw in tool.description.lower() for kw in intent_lower.split()):
-                return tool.name
+        # Fallback: check if any tool name matches the intent
+        if intent in self._tools:
+            return intent
 
         return None
 

@@ -23,7 +23,7 @@ from routes.chat import router as chat_router, start_cleanup_task
 from routes.dashboard import router as dashboard_router
 from routes.approvals import router as approvals_router
 from routes.audit import router as audit_router
-from tools.registry import get_registry
+from tools.registry import get_registry, ToolCategory
 from tools.clickhouse_tool import get_clickhouse_tool
 from guardrails.approval_guard import get_approval_guard
 from scheduler import HealthCheckScheduler
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
                     "description": "Natural language query for the database",
                 }
             },
-            category="database_query",
+            category=ToolCategory.DATABASE_QUERY,
         )
         logger.info("[OK] ClickHouse tool registered")
 
@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
             name="browser_action",
             handler=browser_action,
             description="Perform browser actions with Playwright (requires approval)",
-            category="api",
+            category=ToolCategory.API,
         )
         logger.info("[OK] Browser tool registered")
     except Exception as e:
@@ -132,21 +132,21 @@ async def lifespan(app: FastAPI):
             name="draft_github_issue",
             handler=draft_github_issue,
             description="Draft a GitHub issue (requires approval)",
-            category="api",
+            category=ToolCategory.API,
         )
 
         registry.register_manual(
             name="draft_github_pr",
             handler=draft_github_pr,
             description="Create a GitHub PR (requires approval)",
-            category="api",
+            category=ToolCategory.API,
         )
 
         registry.register_manual(
             name="search_github_issues",
             handler=search_github_issues,
             description="Search GitHub issues (read-only)",
-            category="api",
+            category=ToolCategory.API,
         )
 
         logger.info("[OK] GitHub tools registered")

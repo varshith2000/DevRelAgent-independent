@@ -27,9 +27,9 @@ INTENT_DEFINITIONS = {
             "What's the latency distribution?"
         ],
         "keywords": [
-            "errors", "error", "logs", "metrics", "traces", "query", "queries",
-            "latency", "slow", "failed", "failure", "rate", "occurred", "between",
-            "show me", "what", "how many", "status", "performance", "monitoring"
+            "errors", "error rate", "logs", "metrics", "traces", "latency",
+            "failed", "failure", "requests", "occurred", "performance data",
+            "monitoring data", "database", "clickhouse", "observability"
         ]
     },
     "search_code": {
@@ -40,6 +40,11 @@ INTENT_DEFINITIONS = {
             "Where is the rate limiting implemented?",
             "Show me the User model",
             "How does the caching work?"
+        ],
+        "keywords": [
+            "code", "function", "class", "implementation", "search code",
+            "find code", "where is", "show me the", "how does", "implemented",
+            "source code", "repository", "file", "module"
         ]
     },
     "document_search": {
@@ -87,11 +92,16 @@ INTENT_DEFINITIONS = {
     },
     "dashboard_management": {
         "description": "Create, modify, or manage monitoring dashboards",
-        "tools": ["create_dashboard", "get_dashboard"],
+        "tools": ["create_dashboard", "get_dashboard", "create_grafana_dashboard", "create_service_dashboard"],
         "examples": [
             "Create a dashboard for API metrics",
             "Set up monitoring for the database",
             "Build a service health dashboard"
+        ],
+        "keywords": [
+            "dashboard", "grafana", "panel", "visualization", "visualize",
+            "create dashboard", "build dashboard", "setup dashboard", "new dashboard",
+            "monitoring dashboard", "metrics dashboard", "service dashboard"
         ]
     },
     "ticket_management": {
@@ -233,8 +243,8 @@ Classification:"""
     )
 
     # Check if response is None or empty
-    if response is None or not isinstance(response, str):
-        logger.warning(f"LLM returned None or invalid response type: {type(response)}, falling back to keyword matching")
+    if response is None or not isinstance(response, str) or not response.strip():
+        logger.warning(f"LLM returned None or empty response: {type(response)}, falling back to keyword matching")
         return _classify_with_keywords(user_input)
 
     # Parse response
@@ -257,10 +267,14 @@ Classification:"""
 
     # Validate against known intents
     if intent in INTENT_DEFINITIONS:
+        # If confidence is too low, fall back to keyword matching for better accuracy
+        if confidence < 0.5:
+            logger.info(f"LLM confidence {confidence:.2f} too low, falling back to keyword matching")
+            return _classify_with_keywords(user_input)
         return intent, confidence
     else:
-        logger.warning(f"LLM returned unknown intent: {intent}, using unknown with low confidence")
-        return "unknown", 0.2
+        logger.warning(f"LLM returned unknown intent: {intent}, falling back to keyword matching")
+        return _classify_with_keywords(user_input)
 
 
 def _classify_with_keywords(user_input: str) -> Tuple[str, float]:
@@ -278,7 +292,7 @@ def _classify_with_keywords(user_input: str) -> Tuple[str, float]:
     # Track best match
     best_intent = "unknown"
     best_match_count = 0
-    best_confidence = 0.0
+    confidence = 0.0
 
     # Check each intent's keywords
     for intent_name, intent_data in INTENT_DEFINITIONS.items():
@@ -302,15 +316,39 @@ def _classify_with_keywords(user_input: str) -> Tuple[str, float]:
             best_match_count = match_count
             best_intent = intent_name
 
-    # Calculate confidence based on match quality
-    if best_match_count == 0:
-        confidence = 0.0
-    elif best_match_count == 1:
-        confidence = 0.4  # Low confidence for single keyword match
-    elif best_match_count == 2:
-        confidence = 0.6  # Medium confidence
-    else:
-        confidence = 0.8  # High confidence for multiple matches
+    # Priority override: dashboard_management > database_query when dashboard keywords present
+    # This ensures "Create a dashboard" queries are routed correctly even if they contain "monitoring" or "errors"
+    if best_intent == "database_query":
+        dashboard_keywords = ["dashboard", "grafana", "panel", "visualization", "visualize"]
+        for kw in dashboard_keywords:
+            if kw in query_lower:
+                logger.info(f"Priority override: switching from database_query to dashboard_management due to keyword '{kw}'")
+                best_intent = "dashboard_management"
+                confidence = 0.85  # High confidence for priority override
+                break
+
+    # Priority override: search_code > database_query when code search keywords present
+    # This ensures code search queries are routed correctly even if they contain "show me" or "how"
+    if best_intent == "database_query":
+        code_keywords = ["code", "function", "class", "implementation", "source code",
+                        "where is", "find the", "search code", "repository", "file", "module"]
+        for kw in code_keywords:
+            if kw in query_lower:
+                logger.info(f"Priority override: switching from database_query to search_code due to keyword '{kw}'")
+                best_intent = "search_code"
+                confidence = 0.85  # High confidence for priority override
+                break
+
+    # Calculate confidence based on match quality (if not already set by priority override)
+    if confidence == 0.0:  # Only calculate if not set by priority override
+        if best_match_count == 0:
+            confidence = 0.0
+        elif best_match_count == 1:
+            confidence = 0.4  # Low confidence for single keyword match
+        elif best_match_count == 2:
+            confidence = 0.6  # Medium confidence
+        else:
+            confidence = 0.8  # High confidence for multiple matches
 
     return best_intent, confidence
 

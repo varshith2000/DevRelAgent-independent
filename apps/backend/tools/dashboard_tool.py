@@ -137,10 +137,9 @@ def _list_dashboard_files() -> List[str]:
     name="create_dashboard",
     description="Create custom monitoring dashboard with specified widgets and layout",
     category=ToolCategory.SYSTEM,
-    requires_approval=True,
-    approval_action_type="write_operation",
+    requires_approval=False,
     read_only=False,
-    risk_level="medium"
+    risk_level="low"
 )
 async def create_dashboard(
     name: str,
@@ -327,12 +326,11 @@ async def list_dashboards() -> Dict[str, Any]:
 
 @tool(
     name="update_dashboard",
-    description="Update existing dashboard configuration (requires approval)",
+    description="Update existing dashboard configuration",
     category=ToolCategory.SYSTEM,
-    requires_approval=True,
-    approval_action_type="write_operation",
+    requires_approval=False,
     read_only=False,
-    risk_level="medium"
+    risk_level="low"
 )
 async def update_dashboard(
     dashboard_id: str,

@@ -137,8 +137,8 @@ class SQLGuard:
         re.compile(r"--", re.IGNORECASE),  # SQL comment
         re.compile(r"/\*.*?\*/", re.DOTALL),  # C-style comment
         re.compile(r";\s*\w", re.IGNORECASE),  # Statement separator
-        re.compile(r"'.*?'.*?'", re.DOTALL),  # Multiple string literals
-        re.compile(r'".*?".*?"', re.DOTALL),  # Multiple double-quoted strings
+        # NOTE: Removed multiple string literal patterns as they cause false positives
+        # with legitimate SQL queries. AST-based checks are more reliable.
         re.compile(r"\\x[0-9a-f]{2}", re.IGNORECASE),  # Hex encoding
         re.compile(r"\\[0-7]{3}", re.IGNORECASE),  # Octal encoding
         re.compile(r"\bor\s+1\s*=\s*1\b", re.IGNORECASE),  # Tautology

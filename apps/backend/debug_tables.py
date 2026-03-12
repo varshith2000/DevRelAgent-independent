@@ -49,7 +49,7 @@ for row in result.result_rows:
 
 print(f"   Found {len(devrel_tables)} tables:")
 for table in devrel_tables:
-    print(f"   ✅ {table}")
+    print(f"   [OK] {table}")
 
 if not devrel_tables:
     print(f"   ⚠️ No tables found in 'devrel_test'")

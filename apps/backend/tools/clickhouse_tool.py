@@ -466,7 +466,7 @@ SQL:"""
         lines = []
 
         if result.status == QueryStatus.SUCCESS:
-            lines.append(f"✅ Query executed successfully ({result.row_count:,} rows returned)")
+            lines.append(f"[OK] Query executed successfully ({result.row_count:,} rows returned)")
 
             if result.rows:
                 # Create table-like output
@@ -487,16 +487,16 @@ SQL:"""
                 lines.append(f"\nExecution time: {result.execution_time_ms}ms")
 
         elif result.status == QueryStatus.UNSAFE_SQL:
-            lines.append(f"❌ Query rejected for safety reasons")
+            lines.append(f"[ERROR] Query rejected for safety reasons")
             lines.append(f"Reason: {result.error_message}")
             if result.sql:
                 lines.append(f"\nBlocked SQL: {result.sql}")
 
         elif result.status == QueryStatus.TIMEOUT:
-            lines.append(f"❌ Query exceeded timeout limit ({self.query_timeout}s)")
+            lines.append(f"[ERROR] Query exceeded timeout limit ({self.query_timeout}s)")
 
         elif result.status == QueryStatus.ERROR:
-            lines.append(f"❌ Query execution failed")
+            lines.append(f"[ERROR] Query execution failed")
             lines.append(f"Error: {result.error_message}")
             if result.sql:
                 lines.append(f"\nFailed SQL: {result.sql}")

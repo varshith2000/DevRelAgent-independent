@@ -164,6 +164,86 @@ class DevRelAgentCLI:
                 session=session_context
             )
 
+            # Check if HITL approval is required
+            hitl_required = False
+            if tool_calls:
+                for tc in tool_calls:
+                    # Check if tool result has HITL requirement
+                    if hasattr(tc, 'result') and isinstance(tc.result, dict):
+                        if tc.result.get('hitl_required') or tc.result.get('requires_approval'):
+                            hitl_required = True
+                            break
+
+            # Check if response contains HITL requirement note
+            if "[Note: This action requires human approval before execution.]" in response_text:
+                hitl_required = True
+
+            # If HITL is required and not auto_approve, prompt for approval
+            if hitl_required and not auto_approve and not dry_run:
+                print(f"\n{'='*60}")
+                print("HUMAN APPROVAL REQUIRED")
+                print(f"{'='*60}")
+                print(f"\nThe following action requires your approval:")
+                print(f"\nQuery: {query}")
+
+                if tool_calls:
+                    print(f"\nTools to be executed:")
+                    for tc in tool_calls:
+                        print(f"  - {tc.tool_name}")
+
+                print(f"\nResponse preview:")
+                preview = response_text.split('[Note:')[0].strip()
+                if len(preview) > 200:
+                    preview = preview[:200] + "..."
+                print(f"  {preview}")
+
+                print(f"\n{'='*60}")
+
+                # Prompt for approval
+                while True:
+                    user_input = input("\nDo you approve this action? (approve/reject/cancel): ").strip().lower()
+
+                    if user_input in ['approve', 'yes', 'y', 'ok']:
+                        print("\n[INFO] Action approved by user. Proceeding...")
+                        # Log approval
+                        self.log_audit_event("hitl_approval", {
+                            "investigation_id": investigation_id,
+                            "query": query,
+                            "decision": "approved",
+                            "tools_used": [tc.tool_name for tc in tool_calls]
+                        })
+                        break
+                    elif user_input in ['reject', 'no', 'n']:
+                        print("\n[INFO] Action rejected by user. Cancelling...")
+                        self.log_audit_event("hitl_approval", {
+                            "investigation_id": investigation_id,
+                            "query": query,
+                            "decision": "rejected"
+                        })
+                        return {
+                            "success": False,
+                            "error": "Action rejected by user",
+                            "investigation_id": investigation_id
+                        }
+                    elif user_input in ['cancel', 'exit', 'quit', 'q']:
+                        print("\n[INFO] Cancelled by user.")
+                        self.log_audit_event("hitl_approval", {
+                            "investigation_id": investigation_id,
+                            "query": query,
+                            "decision": "cancelled"
+                        })
+                        return {
+                            "success": False,
+                            "error": "Action cancelled by user",
+                            "investigation_id": investigation_id
+                        }
+                    else:
+                        print("\nInvalid input. Please enter 'approve', 'reject', or 'cancel':")
+
+            # Remove the HITL note from response if approved
+            if "[Note: This action requires human approval before execution.]" in response_text:
+                response_text = response_text.split('[Note:')[0].strip()
+
             if self.verbose:
                 logger.info(f"[VERBOSE] Agent processing complete")
                 logger.info(f"[VERBOSE] Response length: {len(response_text)} characters")

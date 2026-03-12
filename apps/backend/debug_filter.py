@@ -59,7 +59,7 @@ for i, row in enumerate(result.result_rows):
             continue
 
         matched_count += 1
-        print(f"   ✅ MATCHED: {db_name}.{table_name}")
+        print(f"   [OK] MATCHED: {db_name}.{table_name}")
 
 print(f"\n   Total matched: {matched_count}")
 print(f"   Total filtered: {filtered_count}")

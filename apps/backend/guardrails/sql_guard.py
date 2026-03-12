@@ -406,7 +406,7 @@ if __name__ == "__main__":
 
     for query in test_queries:
         is_safe, violations = guard.is_safe_sql(query)
-        status = "✅ SAFE" if is_safe else "❌ UNSAFE"
+        status = "[OK] SAFE" if is_safe else "[ERROR] UNSAFE"
         print(f"\n{status}: {query[:60]}")
         if violations:
             for v in violations:

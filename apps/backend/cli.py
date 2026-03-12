@@ -155,9 +155,13 @@ class DevRelAgentCLI:
                 logger.info(f"[VERBOSE] Processing query with agent loop...")
                 logger.info(f"[VERBOSE] Query length: {len(query)} characters")
 
+            # Create SessionContext from session_id
+            from models.schemas import SessionContext
+            session_context = SessionContext(session_id=self.session_id)
+
             response_text, tool_calls = await self.agent.process_with_tools(
                 query,
-                session=self.session_id
+                session=session_context
             )
 
             if self.verbose:
@@ -209,7 +213,7 @@ class DevRelAgentCLI:
                     print(f"\n{'='*60}")
                     print("TOOLS USED:")
                     for tc in tool_calls:
-                        status = "✅" if tc.success else "❌"
+                        status = "[OK]" if tc.success else "[ERROR]"
                         print(f"  {status} {tc.tool_name}")
                         if tc.result:
                             print(f"     Result: {str(tc.result)[:100]}...")
@@ -439,9 +443,9 @@ async def cmd_export_audit(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n✅ Exported {result.get('events_exported', 0)} audit events to {result.get('output_file')}")
+            print(f"\n[OK] Exported {result.get('events_exported', 0)} audit events to {result.get('output_file')}")
         else:
-            print(f"\n❌ Failed to export audit log: {result.get('error')}")
+            print(f"\n[ERROR] Failed to export audit log: {result.get('error')}")
 
     return 0 if result.get("success") else 1
 
@@ -497,7 +501,7 @@ async def cmd_grafana_list_datasources(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n✅ Available Grafana Datasources ({result.get('total', 0)}):\n")
+            print(f"\n[OK] Available Grafana Datasources ({result.get('total', 0)}):\n")
             for ds in result.get("datasources", []):
                 marker = " (default)" if ds.get("is_default") else ""
                 print(f"   - {ds.get('name')}{marker}")
@@ -507,7 +511,7 @@ async def cmd_grafana_list_datasources(args):
                     print(f"     URL: {ds.get('url')}")
                 print()
         else:
-            print(f"\n❌ Failed to list datasources: {result.get('error')}")
+            print(f"\n[ERROR] Failed to list datasources: {result.get('error')}")
 
     return 0 if result.get("success") else 1
 
@@ -532,7 +536,7 @@ async def cmd_grafana_create_dashboard(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n✅ Dashboard created successfully!")
+            print(f"\n[OK] Dashboard created successfully!")
             print(f"   Service: {result.get('service_name')}")
             print(f"   Dashboard ID: {result.get('dashboard_id')}")
             print(f"   Dashboard URL: {result.get('dashboard_url')}")
@@ -541,7 +545,7 @@ async def cmd_grafana_create_dashboard(args):
             for step in result.get("next_steps", []):
                 print(f"   - {step}")
         else:
-            print(f"\n❌ Failed to create dashboard: {result.get('error')}")
+            print(f"\n[ERROR] Failed to create dashboard: {result.get('error')}")
 
     return 0 if result.get("success") else 1
 
@@ -562,7 +566,7 @@ async def cmd_grafana_list_dashboards(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n✅ Grafana Dashboards ({result.get('total', 0)}):\n")
+            print(f"\n[OK] Grafana Dashboards ({result.get('total', 0)}):\n")
             for dash in result.get("dashboards", []):
                 print(f"   - {dash.get('title')}")
                 print(f"     UID: {dash.get('uid')}")
@@ -570,7 +574,7 @@ async def cmd_grafana_list_dashboards(args):
                 print(f"     URL: {dash.get('url')}")
                 print()
         else:
-            print(f"\n❌ Failed to list dashboards: {result.get('error')}")
+            print(f"\n[ERROR] Failed to list dashboards: {result.get('error')}")
 
     return 0 if result.get("success") else 1
 

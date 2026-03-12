@@ -174,17 +174,17 @@ class AgentLoop:
                     category=ToolCategory.DATABASE_QUERY,
                 )
                 tools_registered.append("clickhouse_query")
-                logger.info("✅ Registered clickhouse_query tool")
+                logger.info("[OK] Registered clickhouse_query tool")
 
             except Exception as e:
                 tools_failed.append(f"clickhouse_query: {e}")
-                logger.warning(f"⚠️ Failed to register clickhouse_query tool: {e}")
+                logger.warning(f"[WARNING] Failed to register clickhouse_query tool: {e}")
         
         # 2. Register GitHub tools
         if "draft_github_issue" not in self.registry.tool_names:
             try:
-                from tools.github_tool import draft_github_issue, create_github_pr
-                
+                from tools.github_tool import draft_github_issue
+
                 self.registry.register_manual(
                     name="draft_github_issue",
                     handler=draft_github_issue,
@@ -203,11 +203,11 @@ class AgentLoop:
                     risk_level="medium",
                 )
                 tools_registered.append("draft_github_issue")
-                logger.info("✅ Registered draft_github_issue tool")
-                
+                logger.info("[OK] Registered draft_github_issue tool")
+
             except Exception as e:
                 tools_failed.append(f"draft_github_issue: {e}")
-                logger.warning(f"⚠️ Failed to register draft_github_issue tool: {e}")
+                logger.warning(f"[WARNING] Failed to register draft_github_issue tool: {e}")
         
         # 3. Register Grafana dashboard tools
         if "create_grafana_dashboard" not in self.registry.tool_names:
@@ -230,17 +230,17 @@ class AgentLoop:
                     risk_level="low",
                 )
                 tools_registered.append("create_grafana_dashboard")
-                logger.info("✅ Registered create_grafana_dashboard tool")
+                logger.info("[OK] Registered create_grafana_dashboard tool")
                 
             except Exception as e:
                 tools_failed.append(f"create_grafana_dashboard: {e}")
-                logger.warning(f"⚠️ Failed to register create_grafana_dashboard tool: {e}")
+                logger.warning(f"[WARNING] Failed to register create_grafana_dashboard tool: {e}")
         
         # 4. Register code search tools (if repos are indexed)
         if "search_code" not in self.registry.tool_names:
             try:
-                from tools.code_search.mcp_server import search_code, get_file_content, list_files
-                
+                from tools.code_search.simple_search import search_code
+
                 self.registry.register_manual(
                     name="search_code",
                     handler=search_code,
@@ -252,59 +252,59 @@ class AgentLoop:
                     category=ToolCategory.CODE_SEARCH,
                 )
                 tools_registered.append("search_code")
-                logger.info("✅ Registered search_code tool")
-                
+                logger.info("[OK] Registered search_code tool")
+
             except Exception as e:
                 tools_failed.append(f"search_code: {e}")
-                logger.warning(f"⚠️ Failed to register search_code tool: {e}")
+                logger.warning(f"[WARNING] Failed to register search_code tool: {e}")
         
         # 5. Register gap detection tool
-        if "detect_gaps" not in self.registry.tool_names:
+        if "detect_documentation_gaps" not in self.registry.tool_names:
             try:
-                from tools.gap_detection_tool import detect_gaps
-                
+                from tools.gap_detection_tool import detect_documentation_gaps
+
                 self.registry.register_manual(
-                    name="detect_gaps",
-                    handler=detect_gaps,
+                    name="detect_documentation_gaps",
+                    handler=detect_documentation_gaps,
                     description="Detect missing documentation or code gaps in the project",
                     parameters={
                         "area": {"type": "string", "description": "Area to check for gaps (e.g., 'authentication', 'api')"}
                     },
                     category=ToolCategory.UTILITY,
                 )
-                tools_registered.append("detect_gaps")
-                logger.info("✅ Registered detect_gaps tool")
-                
+                tools_registered.append("detect_documentation_gaps")
+                logger.info("[OK] Registered detect_documentation_gaps tool")
+
             except Exception as e:
-                tools_failed.append(f"detect_gaps: {e}")
-                logger.warning(f"⚠️ Failed to register detect_gaps tool: {e}")
+                tools_failed.append(f"detect_documentation_gaps: {e}")
+                logger.warning(f"[WARNING] Failed to register detect_documentation_gaps tool: {e}")
         
         # 6. Register observability tool
-        if "get_observability" not in self.registry.tool_names:
+        if "get_error_rate" not in self.registry.tool_names:
             try:
-                from tools.observability_tool import get_service_health
-                
+                from tools.observability_tool import get_error_rate
+
                 self.registry.register_manual(
-                    name="get_observability",
-                    handler=get_service_health,
-                    description="Get observability metrics for a service (errors, latency, throughput)",
+                    name="get_error_rate",
+                    handler=get_error_rate,
+                    description="Get error rate metrics for a service",
                     parameters={
                         "service_name": {"type": "string", "description": "Name of the service"},
-                        "time_range": {"type": "string", "description": "Time range (e.g., '1h', '24h')"}
+                        "time_range": {"type": "string", "description": "Time range (e.g., '1h', '24h')", "default": "1h"}
                     },
                     category=ToolCategory.DATABASE_QUERY,
                 )
-                tools_registered.append("get_observability")
-                logger.info("✅ Registered get_observability tool")
-                
+                tools_registered.append("get_error_rate")
+                logger.info("[OK] Registered get_error_rate tool")
+
             except Exception as e:
-                tools_failed.append(f"get_observability: {e}")
-                logger.warning(f"⚠️ Failed to register get_observability tool: {e}")
+                tools_failed.append(f"get_error_rate: {e}")
+                logger.warning(f"[WARNING] Failed to register get_error_rate tool: {e}")
         
         # Log summary
-        logger.info(f"📊 Tool registration complete: {len(tools_registered)} registered, {len(tools_failed)} failed")
+        logger.info(f"[INFO] Tool registration complete: {len(tools_registered)} registered, {len(tools_failed)} failed")
         if tools_failed:
-            logger.warning(f"⚠️ Failed tools: {tools_failed}")
+            logger.warning(f"[WARNING] Failed tools: {tools_failed}")
 
     async def process(
         self,
@@ -1157,14 +1157,74 @@ class AgentLoop:
                 max_tokens=800,
                 system="You are DevRelAgent, an AI-powered developer relations assistant. "
                       "Be helpful, accurate, and concise. If a tool returned results, summarize them clearly. "
-                      "If a tool failed, explain what happened and suggest alternatives.",
+                      "Keep responses under 200 words."
             )
+
+            # If LLM fails, generate a simple fallback response
+            if not response or response.strip() == "":
+                logger.warning("LLM response generation failed, using fallback")
+                return self._generate_fallback_response(user_input, tool_result)
 
             return response
 
         except Exception as e:
             logger.error(f"Response generation failed: {e}")
-            return "I apologize, but I encountered an error generating my response."
+            return self._generate_fallback_response(user_input, tool_result)
+
+    def _generate_fallback_response(self, user_input: str, tool_result: Optional[ToolCallResult]) -> str:
+        """
+        Generate a simple fallback response when LLM is not available.
+
+        Args:
+            user_input: Original user input
+            tool_result: Result from tool execution
+
+        Returns:
+            Fallback response string
+        """
+        if tool_result and tool_result.success:
+            # Tool executed successfully, provide a simple summary
+            result = tool_result.result
+            if isinstance(result, dict) and 'result_rows' in result:
+                rows = result['result_rows']
+                columns = result.get('column_names', [])
+
+                if rows:
+                    count = len(rows)
+                    if count == 1:
+                        response = f"I found 1 result for your query about '{user_input}'.\n\n"
+                    else:
+                        response = f"I found {count} results for your query about '{user_input}'.\n\n"
+
+                    # Show first few results
+                    for i, row in enumerate(rows[:3], 1):
+                        row_dict = dict(zip(columns, row))
+                        response += f"{i}. "
+                        if 'timestamp' in row_dict:
+                            response += f"[{row_dict['timestamp']}] "
+                        if 'service' in row_dict:
+                            response += f"{row_dict['service']}: "
+                        if 'message' in row_dict:
+                            response += f"{row_dict['message']}"
+                        elif 'level' in row_dict:
+                            response += f"Level: {row_dict['level']}"
+                        response += "\n"
+
+                    if count > 3:
+                        response += f"\n(Showing 3 of {count} results)"
+
+                    return response
+
+            return f"Query executed successfully. Found results for: {user_input}"
+
+        elif tool_result and not tool_result.success:
+            # Tool failed
+            error = tool_result.error or "Unknown error"
+            return f"I encountered an error while processing your query: {error}"
+
+        else:
+            # No tool was executed
+            return f"I processed your query about '{user_input}', but I need more information to provide a complete answer."
 
     async def _generate_structured_response(
         self,

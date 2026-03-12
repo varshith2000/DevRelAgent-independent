@@ -206,6 +206,12 @@ class ClickHouseTool:
             SQL query string or None if generation failed
         """
         try:
+            # First try rule-based matching for common queries (faster and more reliable)
+            rule_sql = self._try_rule_based_sql(natural_query)
+            if rule_sql:
+                logger.info(f"Using rule-based SQL for query: {natural_query[:50]}...")
+                return rule_sql
+
             # Get schema context
             schema_context = self._build_schema_context(natural_query)
 
@@ -235,6 +241,11 @@ Examples:
                 system=system_prompt,
             )
 
+            # If LLM fails or returns empty, try rule-based fallback
+            if not sql or sql.strip() == "":
+                logger.warning("LLM returned empty SQL, trying rule-based fallback")
+                return self._try_rule_based_sql(natural_query)
+
             # Extract SQL from response (remove markdown code blocks if present)
             sql = self._extract_sql_from_response(sql)
 
@@ -242,11 +253,78 @@ Examples:
                 logger.info(f"Generated SQL: {sql[:200]}...")
                 return sql.strip()
 
-            return None
+            # If SQL extraction failed, try rule-based fallback
+            logger.warning("SQL extraction failed, trying rule-based fallback")
+            return self._try_rule_based_sql(natural_query)
 
         except Exception as e:
-            logger.error(f"Failed to generate SQL: {e}")
-            return None
+            logger.error(f"Failed to generate SQL: {e}, trying rule-based fallback")
+            return self._try_rule_based_sql(natural_query)
+
+    def _try_rule_based_sql(self, natural_query: str, force_fallback: bool = False) -> Optional[str]:
+        """
+        Try to generate SQL using rule-based pattern matching for common queries.
+
+        Args:
+            natural_query: Natural language query
+            force_fallback: If True, skip LLM and use rules directly
+
+        Returns:
+            SQL query string or None if no rule matches
+        """
+        query_lower = natural_query.lower()
+
+        # Common patterns for errors
+        if any(word in query_lower for word in ["critical error", "critical errors", "critical"]):
+            return "SELECT timestamp, service, level, message, status_code FROM logs WHERE level = 'CRITICAL' ORDER BY timestamp DESC LIMIT 20"
+
+        if any(word in query_lower for word in ["recent error", "show me error", "errors", "error"]):
+            return "SELECT timestamp, service, level, message, status_code FROM logs WHERE level IN ('ERROR', 'CRITICAL') ORDER BY timestamp DESC LIMIT 20"
+
+        if any(word in query_lower for word in ["count error", "error count", "errors by"]):
+            if "service" in query_lower:
+                return "SELECT service, level, count(*) as error_count FROM logs WHERE level IN ('ERROR', 'CRITICAL') GROUP BY service, level ORDER BY service, level"
+            return "SELECT level, count(*) as error_count FROM logs WHERE level IN ('ERROR', 'CRITICAL') GROUP BY level"
+
+        # Common patterns for specific services
+        if "database" in query_lower and any(word in query_lower for word in ["problem", "issue", "error"]):
+            return "SELECT timestamp, level, message, status_code FROM logs WHERE service = 'database' AND level IN ('ERROR', 'CRITICAL') ORDER BY timestamp DESC LIMIT 20"
+
+        if "cache" in query_lower and any(word in query_lower for word in ["problem", "issue", "error"]):
+            return "SELECT timestamp, level, message, status_code FROM logs WHERE service = 'cache' AND level IN ('ERROR', 'CRITICAL') ORDER BY timestamp DESC LIMIT 20"
+
+        if "auth" in query_lower and any(word in query_lower for word in ["problem", "issue", "error"]):
+            return "SELECT timestamp, level, message, status_code FROM logs WHERE service = 'auth' AND level IN ('ERROR', 'CRITICAL') ORDER BY timestamp DESC LIMIT 20"
+
+        # Authentication failures
+        if any(word in query_lower for word in ["authentication", "auth failure", "login failure"]):
+            return "SELECT timestamp, service, message, user_id FROM logs WHERE message LIKE '%Authentication%' ORDER BY timestamp DESC LIMIT 20"
+
+        # Service crashes
+        if any(word in query_lower for word in ["crash", "crashed", "service crash"]):
+            return "SELECT timestamp, service, level, message FROM logs WHERE message LIKE '%crash%' OR level = 'CRITICAL' ORDER BY timestamp DESC LIMIT 20"
+
+        # Memory issues
+        if any(word in query_lower for word in ["memory", "high memory"]):
+            return "SELECT timestamp, service, level, message FROM logs WHERE message LIKE '%memory%' ORDER BY timestamp DESC LIMIT 20"
+
+        # Slow requests
+        if any(word in query_lower for word in ["slow", "latency", "duration", "timeout"]):
+            return "SELECT timestamp, service, message, duration_ms FROM logs WHERE duration_ms > 4000 ORDER BY duration_ms DESC LIMIT 20"
+
+        # Recent logs
+        if any(word in query_lower for word in ["recent log", "show log", "logs", "latest"]):
+            return "SELECT timestamp, service, level, message FROM logs ORDER BY timestamp DESC LIMIT 50"
+
+        # Service status
+        if any(word in query_lower for word in ["status", "health"]):
+            return "SELECT service, level, count(*) as count FROM logs WHERE timestamp > now() - INTERVAL 1 HOUR GROUP BY service, level ORDER BY service, level"
+
+        # Default fallback for database queries
+        if force_fallback or any(word in query_lower for word in ["show", "get", "find", "what", "how many"]):
+            return "SELECT timestamp, service, level, message FROM logs WHERE level IN ('ERROR', 'WARNING', 'CRITICAL') ORDER BY timestamp DESC LIMIT 50"
+
+        return None
 
     def _build_schema_context(self, natural_query: str) -> str:
         """Build schema context for LLM prompt."""

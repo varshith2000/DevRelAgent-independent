@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
     try:
         from tools.kedb_tool import get_kedb_tool
         kedb_tool = get_kedb_tool()
-        logger.info("✅ KeDB tools registered")
+        logger.info("[OK] KeDB tools registered")
     except Exception as e:
         logger.warning(f"⚠️ KeDB tools not available: {e}")
 
@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
             },
             category="database_query",
         )
-        logger.info("✅ ClickHouse tool registered")
+        logger.info("[OK] ClickHouse tool registered")
 
     except Exception as e:
         logger.warning(f"⚠️ ClickHouse tool not available: {e}")
@@ -85,42 +85,42 @@ async def lifespan(app: FastAPI):
             description="Perform browser actions with Playwright (requires approval)",
             category="api",
         )
-        logger.info("✅ Browser tool registered")
+        logger.info("[OK] Browser tool registered")
     except Exception as e:
         logger.warning(f"⚠️ Browser tool not available: {e}")
 
     # Import Grafana tools (auto-registered via @tool decorator)
     try:
         from tools import grafana_tool
-        logger.info("✅ Grafana tools registered")
+        logger.info("[OK] Grafana tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Grafana tools not available: {e}")
 
     # Import observability tools (auto-registered via @tool decorator)
     try:
         from tools import observability_tool
-        logger.info("✅ Observability tools registered")
+        logger.info("[OK] Observability tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Observability tools not available: {e}")
 
     # Import gap detection tools (auto-registered via @tool decorator)
     try:
         from tools import gap_detection_tool
-        logger.info("✅ Gap detection tools registered")
+        logger.info("[OK] Gap detection tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Gap detection tools not available: {e}")
 
     # Import automation tools (auto-registered via @tool decorator)
     try:
         from tools import automation_tool
-        logger.info("✅ Automation tools registered")
+        logger.info("[OK] Automation tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Automation tools not available: {e}")
 
     # Import dashboard tools (auto-registered via @tool decorator)
     try:
         from tools import dashboard_tool
-        logger.info("✅ Dashboard tools registered")
+        logger.info("[OK] Dashboard tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Dashboard tools not available: {e}")
 
@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
             category="api",
         )
 
-        logger.info("✅ GitHub tools registered")
+        logger.info("[OK] GitHub tools registered")
     except Exception as e:
         logger.warning(f"⚠️ GitHub tools not available: {e}")
 
@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     try:
         approval_guard = get_approval_guard()
         approval_guard.set_sse_queue(sse_queue)
-        logger.info("✅ ApprovalGuard initialized")
+        logger.info("[OK] ApprovalGuard initialized")
     except Exception as e:
         logger.warning(f"⚠️ ApprovalGuard initialization failed: {e}")
 
@@ -184,7 +184,7 @@ async def lifespan(app: FastAPI):
 
             # Start scheduler
             health_scheduler.start()
-            logger.info("✅ Health check scheduler started")
+            logger.info("[OK] Health check scheduler started")
         else:
             logger.info("ℹ️ Health check scheduler disabled (HEALTH_CHECK_ENABLED=false)")
 

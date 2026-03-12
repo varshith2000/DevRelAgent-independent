@@ -25,6 +25,11 @@ INTENT_DEFINITIONS = {
             "How many requests failed today?",
             "Show me slow queries",
             "What's the latency distribution?"
+        ],
+        "keywords": [
+            "errors", "error", "logs", "metrics", "traces", "query", "queries",
+            "latency", "slow", "failed", "failure", "rate", "occurred", "between",
+            "show me", "what", "how many", "status", "performance", "monitoring"
         ]
     },
     "search_code": {
@@ -55,6 +60,11 @@ INTENT_DEFINITIONS = {
             "Investigate the recent outage",
             "What's causing high error rates?",
             "Debug the performance issue"
+        ],
+        "keywords": [
+            "investigate", "investigation", "outage", "downtime", "issue", "problem",
+            "debug", "troubleshoot", "diagnose", "root cause", "causing", "slow",
+            "performance", "degradation"
         ]
     },
     "gap_detection": {
@@ -126,10 +136,35 @@ def classify_intent(perception: PerceptionResult) -> Tuple[str, float]:
         - intent_name: The classified intent (may be "unknown")
         - confidence_score: Float between 0.0 and 1.0 indicating confidence
     """
-    # If we have a clear tool hint from perception, use it with high confidence
+    # If we have a clear intent from perception, use it with high confidence
+    if perception.intent and perception.intent in INTENT_DEFINITIONS:
+        logger.info(f"Using perception intent: {perception.intent}")
+        return perception.intent, 0.90
+
+    # If we have a clear tool hint from perception, map it to intent
     if perception.tool_hint and perception.tool_hint in INTENT_DEFINITIONS:
         logger.info(f"Using tool hint: {perception.tool_hint}")
         return perception.tool_hint, 0.95
+
+    # Map tool hints to intents
+    TOOL_HINT_TO_INTENT = {
+        "clickhouse_query": "database_query",
+        "get_error_rate": "database_query",
+        "get_top_errors": "database_query",
+        "get_latency_metrics": "database_query",
+        "code_search": "search_code",
+        "rag_search": "document_search",
+        "create_github_issue": "ticket_management",
+        "draft_github_issue": "ticket_management",
+        "create_service_dashboard": "dashboard_management",
+        "create_grafana_dashboard": "dashboard_management",
+        "detect_documentation_gaps": "gap_detection",
+    }
+
+    if perception.tool_hint and perception.tool_hint in TOOL_HINT_TO_INTENT:
+        intent = TOOL_HINT_TO_INTENT[perception.tool_hint]
+        logger.info(f"Mapped tool hint {perception.tool_hint} to intent {intent}")
+        return intent, 0.90
 
     # Use LLM for intent classification with confidence
     try:
@@ -197,6 +232,11 @@ Classification:"""
         max_tokens=50
     )
 
+    # Check if response is None or empty
+    if response is None or not isinstance(response, str):
+        logger.warning(f"LLM returned None or invalid response type: {type(response)}, falling back to keyword matching")
+        return _classify_with_keywords(user_input)
+
     # Parse response
     try:
         parts = response.strip().split("|")
@@ -210,10 +250,10 @@ Classification:"""
             # Fallback if response format is wrong
             intent = response.strip().lower()
             confidence = 0.5  # Default medium confidence
-    except (ValueError, IndexError):
+    except (ValueError, IndexError, AttributeError) as e:
         # Fallback if parsing fails
-        intent = response.strip().lower()
-        confidence = 0.5  # Default medium confidence
+        logger.warning(f"Failed to parse LLM response: {e}, response: {response}, falling back to keyword matching")
+        return _classify_with_keywords(user_input)
 
     # Validate against known intents
     if intent in INTENT_DEFINITIONS:

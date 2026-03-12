@@ -77,7 +77,7 @@ class AuditLogger:
         # ClickHouse client (lazy initialization)
         self._clickhouse_client = None
 
-        logger.info(f"✅ AuditLogger initialized with storage_path={storage_path}")
+        logger.info(f"[OK] AuditLogger initialized with storage_path={storage_path}")
 
     async def log(self, entry: AuditEntry) -> bool:
         """
@@ -112,7 +112,7 @@ class AuditLogger:
             if self.enable_clickhouse:
                 await self._write_to_clickhouse(sanitized_entry)
 
-            logger.debug(f"✅ Logged audit entry: {entry.audit_id}")
+            logger.debug(f"[OK] Logged audit entry: {entry.audit_id}")
             return True
 
         except Exception as e:
@@ -312,7 +312,7 @@ class AuditLogger:
                 [data]
             )
 
-            logger.debug(f"✅ Wrote audit entry to ClickHouse: {entry.audit_id}")
+            logger.debug(f"[OK] Wrote audit entry to ClickHouse: {entry.audit_id}")
 
         except Exception as e:
             logger.warning(f"Failed to write to ClickHouse: {e}")
@@ -527,7 +527,7 @@ class AuditLogger:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump([e.model_dump() for e in entries], f, indent=2, default=str)
 
-        logger.info(f"✅ Exported {len(entries)} entries to {file_path}")
+        logger.info(f"[OK] Exported {len(entries)} entries to {file_path}")
         return file_path
 
     def _export_csv(self, entries: List[AuditEntry], session_id: str) -> str:
@@ -573,7 +573,7 @@ class AuditLogger:
                     "error_message": (entry.error_message or "")[:500],
                 })
 
-        logger.info(f"✅ Exported {len(entries)} entries to {file_path}")
+        logger.info(f"[OK] Exported {len(entries)} entries to {file_path}")
         return file_path
 
     def _calculate_summary(

@@ -34,7 +34,7 @@ class ClickHouseClient:
             self._client = clickhouse_connect.get_client(**config.to_client_kwargs())
             # Test connection
             result = self._client.query("SELECT 1")
-            logger.info("✅ Successfully connected to ClickHouse Cloud!")
+            logger.info("[OK] Successfully connected to ClickHouse Cloud!")
         except Exception as e:
             logger.error(f"❌ Failed to connect to ClickHouse Cloud: {e}")
             raise
@@ -170,7 +170,7 @@ def example_setup():
         partition_by="toYYYYMM(timestamp)",
     )
 
-    print("✅ Database and table created successfully!")
+    print("[OK] Database and table created successfully!")
 
 
 def example_insert():
@@ -188,7 +188,7 @@ def example_insert():
         column_names=["id", "timestamp", "event_type", "user_id", "metadata"],
     )
 
-    print("✅ Data inserted successfully!")
+    print("[OK] Data inserted successfully!")
 
 
 def example_query():

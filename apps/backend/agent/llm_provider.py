@@ -12,10 +12,13 @@ Usage:
 """
 
 import os
+import logging
 from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001")
@@ -104,12 +107,28 @@ class GeminiProvider(LLMProvider):
 
     def generate(self, prompt: str, max_tokens: int = 1000, system: Optional[str] = None) -> str:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=full_prompt,
-            config={"max_output_tokens": max_tokens},
-        )
-        return response.text.strip()
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
+                config={"max_output_tokens": max_tokens},
+            )
+
+            # Handle response safely - check if text exists
+            if response and hasattr(response, 'text') and response.text:
+                return response.text.strip()
+            elif response and hasattr(response, 'candidates') and response.candidates:
+                # Fallback to candidates if text is not available
+                if response.candidates[0].content.parts:
+                    return response.candidates[0].content.parts[0].text.strip()
+            # If all else fails, return empty string
+            logger.warning(f"Gemini response had no text content. Response type: {type(response)}, hasattr text: {hasattr(response, 'text')}")
+            return ""
+
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            return ""
 
 
 class ZAIProvider(LLMProvider):

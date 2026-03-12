@@ -215,7 +215,7 @@ def setup_clickhouse_test_data():
         # Create test database
         print("\n📦 Creating test database...")
         client.create_database("devrel_test")
-        print("✅ Database 'devrel_test' created")
+        print("[OK] Database 'devrel_test' created")
 
         # Create logs table
         print("\n📋 Creating logs table...")
@@ -234,7 +234,7 @@ def setup_clickhouse_test_data():
             PARTITION BY toYYYYMM(timestamp)
             SETTINGS index_granularity = 8192
         """)
-        print("✅ Table 'logs' created")
+        print("[OK] Table 'logs' created")
 
         # Create metrics table
         print("\n📊 Creating metrics table...")
@@ -250,7 +250,7 @@ def setup_clickhouse_test_data():
             ORDER BY (timestamp, metric_name)
             PARTITION BY toYYYYMM(timestamp)
         """)
-        print("✅ Table 'metrics' created")
+        print("[OK] Table 'metrics' created")
 
         # Create users table
         print("\n👥 Creating users table...")
@@ -267,7 +267,7 @@ def setup_clickhouse_test_data():
             ORDER BY id
             PRIMARY KEY id
         """)
-        print("✅ Table 'users' created")
+        print("[OK] Table 'users' created")
 
         # Insert logs
         print("\n📝 Generating and inserting log data...")
@@ -277,7 +277,7 @@ def setup_clickhouse_test_data():
             logs,
             column_names=["timestamp", "level", "message", "service", "user_id", "duration_ms", "status_code"]
         )
-        print(f"✅ Inserted {len(logs)} log records")
+        print(f"[OK] Inserted {len(logs)} log records")
 
         # Insert metrics
         print("\n📈 Generating and inserting metrics...")
@@ -287,7 +287,7 @@ def setup_clickhouse_test_data():
             metrics,
             column_names=["timestamp", "metric_name", "value", "service", "environment"]
         )
-        print(f"✅ Inserted {len(metrics)} metric records")
+        print(f"[OK] Inserted {len(metrics)} metric records")
 
         # Insert users
         print("\n👤 Generating and inserting users...")
@@ -297,7 +297,7 @@ def setup_clickhouse_test_data():
             users,
             column_names=["id", "first_name", "last_name", "role", "is_active", "created_at"]
         )
-        print(f"✅ Inserted {len(users)} user records")
+        print(f"[OK] Inserted {len(users)} user records")
 
         # Verify data
         print("\n🔍 Verifying data...")
@@ -323,7 +323,7 @@ def setup_clickhouse_test_data():
         print("   • 'List all active users'")
 
         print("\n" + "=" * 60)
-        print("✅ Test data setup complete!")
+        print("[OK] Test data setup complete!")
         print("=" * 60)
 
         return True
@@ -359,7 +359,7 @@ def test_sample_queries():
             result = tool.query_nl(query)
 
             if result.status.value == "success":
-                print(f"✅ Rows: {result.row_count}")
+                print(f"[OK] Rows: {result.row_count}")
                 if result.rows:
                     for row in result.rows[:3]:
                         print(f"   {row}")
@@ -368,7 +368,7 @@ def test_sample_queries():
             else:
                 print(f"❌ Error: {result.error_message}")
 
-        print("\n✅ Sample queries complete!")
+        print("\n[OK] Sample queries complete!")
 
     except Exception as e:
         print(f"\n❌ Query test failed: {e}")

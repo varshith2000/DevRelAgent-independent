@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from database import get_clickhouse_client; client = get_clickhouse_client\\(\\); print\\(''ClickHouse connection successful''\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

@@ -1,12 +1,12 @@
 """
 LLM Provider Abstraction — Multi-provider support
 
-Supports Anthropic (default), OpenAI, and Google Gemini.
+Supports Anthropic (default), OpenAI, Google Gemini, and z.ai GLM.
 Select provider via LLM_PROVIDER env var.
 
 Usage:
     from agent.llm_provider import get_llm, llm_generate
-    
+
     llm = get_llm()
     response = llm_generate("Explain this code", max_tokens=1000)
 """
@@ -27,6 +27,16 @@ GEMINI_MODELS = [
     "gemini-1.5-pro",       # Gemini 1.5 Pro
     "gemini-1.5-flash",     # Gemini 1.5 Flash
     "gemini-1.5-flash-8b"   # Gemini 1.5 Flash 8B (lightweight)
+]
+
+# Supported z.ai GLM models
+ZAI_MODELS = [
+    "glm-4-plus",           # GLM-4 Plus (most capable)
+    "glm-4-air",            # GLM-4 Air (balanced performance)
+    "glm-4-flash",          # GLM-4 Flash (fastest, cost-effective)
+    "glm-4-long",           # GLM-4 Long (extended context)
+    "glm-zero",             # GLM-Zero (reasoning-optimized)
+    "glm-4.5-air",          # GLM-4.5 Air (newer version)
 ]
 
 
@@ -102,12 +112,44 @@ class GeminiProvider(LLMProvider):
         return response.text.strip()
 
 
+class ZAIProvider(LLMProvider):
+    """z.ai GLM provider (Zhipu AI)."""
+
+    def __init__(self, model: str):
+        super().__init__(model)
+        from openai import OpenAI
+        # Zhipu AI uses OpenAI-compatible API with JWT authentication
+        # The API key format should be: id.secret
+        api_key = os.getenv("Z_AI_API_KEY")
+        # Validate API key format
+        if not api_key or "." not in api_key:
+            raise ValueError("Z_AI_API_KEY must be in format: id.secret (e.g., 12345678.abcdef)")
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://open.bigmodel.cn/api/paas/v4/"
+        )
+
+    def generate(self, prompt: str, max_tokens: int = 1000, system: Optional[str] = None) -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        response = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=messages,
+        )
+        return response.choices[0].message.content.strip()
+
+
 # ─── Factory ─────────────────────────────────────────
 
 _PROVIDERS = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
     "gemini": GeminiProvider,
+    "zai": ZAIProvider,
+    "glm": ZAIProvider,  # Alias for zai
 }
 
 _instance: Optional[LLMProvider] = None

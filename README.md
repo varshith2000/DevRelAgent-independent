@@ -2,6 +2,57 @@
 
 > 24/7 AI-Powered Developer Relations Agent — Combines RAG, observability, code intelligence, browser automation, and a Known Error Database to supercharge developer support.
 
+## CLI Usage
+
+The DevRelAgent CLI provides production-grade command-line interface with multiple flags for different use cases:
+
+### Basic Investigation
+
+```bash
+# Run an investigation
+python cli.py investigate "Why is the API slow?"
+
+# Dry-run mode (no write operations)
+python cli.py investigate "API errors" --dry-run
+
+# JSON output for automation
+python cli.py investigate "Database latency" --json
+
+# Auto-approve all actions (use with caution)
+python cli.py investigate "Create dashboard" --auto-approve
+```
+
+### Advanced CLI Flags
+
+```bash
+# Verbose mode with detailed output
+python cli.py investigate "API errors" --verbose
+
+# Use specific session ID for continuity
+python cli.py investigate "Follow up on previous issue" --session sess_20260311_120000
+
+# Combined flags
+python cli.py investigate "Check logs" --dry-run --verbose --json
+
+# Status and monitoring
+python cli.py status --verbose
+python cli.py list-investigations --status completed --limit 10
+
+# Export audit logs
+python cli.py export-audit --output audit.json
+```
+
+### CLI Flag Reference
+
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--dry-run` | Show what would be done without executing | `--dry-run` |
+| `--json` | Output results in JSON format | `--json` |
+| `--auto-approve` | Skip approval prompts (use with caution) | `--auto-approve` |
+| `--session` | Specify session ID for continuity | `--session sess_123` |
+| `--verbose, -v` | Increase output verbosity | `--verbose` |
+| `--debug` | Enable debug logging | `--debug` |
+
 ## Architecture
 
 ```
@@ -144,3 +195,57 @@ python tests/test_code_search.py
 - [CodeRepoSemanticSearch](./CodeRepoSemanticSearch/) — Reference implementation for code indexing
 - [ProjectPlan.md](./ProjectPlan.md) — Full project proposal and architecture
 - [Issues.md](./Issues.md) — Detailed issue breakdown by phase
+
+## Production Documentation
+
+### Security & Governance
+
+- **[Security Model](./docs/security.md)** - Complete security architecture, threat mitigation, and compliance features
+- **[Capabilities](./docs/capabilities.md)** - What DevRelAgent can and cannot do, risk levels, and usage guidelines
+- **[Disabling](./docs/disable.md)** - How to disable or shut down DevRelAgent in various scenarios
+
+### Operational Documentation
+
+- **[Incident Scenarios](./docs/incidents.md)** - Real-world incident examples and how DevRelAgent helps resolve them
+- **[Audit Trail](./apps/backend/audit/)** - Complete audit logging for compliance and security
+- **[Guardrails](./apps/backend/guardrails/)** - Input/output/tool validation and approval workflows
+
+### Key Production Features
+
+#### **Audit Trail**
+- Complete logging of all user interactions and tool executions
+- Tamper-evident audit logs with cryptographic hashing
+- Export capabilities (JSON/CSV) for compliance reporting
+- Data access tracking and approval history
+
+#### **Security Controls**
+- Multi-layer guardrails (input, output, tool)
+- Intent classification with confidence scoring
+- Human-in-the-loop approval for risky actions
+- PII detection and redaction
+
+#### **Explain-Before-Act**
+- Detailed explanations before tool execution
+- Risk assessment and expected outcomes
+- Approval request generation for high-risk actions
+
+#### **Structured Outputs**
+- Confidence scores and certainty levels
+- Evidence-backed observations
+- Actionable recommendations
+- Next steps and suggested actions
+
+### Deployment Considerations
+
+- **Multi-Tenant Support**: Optional tenant isolation for enterprise deployments
+- **Compliance Ready**: SOC 2, HIPAA, GDPR, PCI DSS support
+- **Scalable Architecture**: Horizontal scaling with stateless API design
+- **Monitoring**: Health checks, metrics, and alerting integration
+
+### Support
+
+For production deployments:
+- **Documentation**: [Project Wiki](https://github.com/your-org/DevRelAgent/wiki)
+- **Issues**: [GitHub Issues](https://github.com/your-org/DevRelAgent/issues)
+- **Security**: security@example.com
+- **Support**: support@example.com

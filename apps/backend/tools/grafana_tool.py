@@ -41,14 +41,14 @@ GRAFANA_HEADERS = {
 
 # ============== Helper Functions ==============
 
-def _grafana_request(
+async def _grafana_request(
     method: str,
     endpoint: str,
     data: Optional[Dict[str, Any]] = None,
     timeout: float = 30.0
 ) -> Dict[str, Any]:
     """
-    Make request to Grafana API.
+    Make async request to Grafana API.
 
     Args:
         method: HTTP method (GET, POST, PUT, DELETE)
@@ -68,33 +68,29 @@ def _grafana_request(
     url = f"{GRAFANA_URL}/api{endpoint}"
 
     try:
-        async def _make_request():
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                if method.upper() == "GET":
-                    response = await client.get(url, headers=GRAFANA_HEADERS, params=data)
-                elif method.upper() == "POST":
-                    response = await client.post(url, headers=GRAFANA_HEADERS, json=data)
-                elif method.upper() == "PUT":
-                    response = await client.put(url, headers=GRAFANA_HEADERS, json=data)
-                elif method.upper() == "DELETE":
-                    response = await client.delete(url, headers=GRAFANA_HEADERS)
-                else:
-                    return {"success": False, "error": f"Invalid method: {method}"}
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method.upper() == "GET":
+                response = await client.get(url, headers=GRAFANA_HEADERS, params=data)
+            elif method.upper() == "POST":
+                response = await client.post(url, headers=GRAFANA_HEADERS, json=data)
+            elif method.upper() == "PUT":
+                response = await client.put(url, headers=GRAFANA_HEADERS, json=data)
+            elif method.upper() == "DELETE":
+                response = await client.delete(url, headers=GRAFANA_HEADERS)
+            else:
+                return {"success": False, "error": f"Invalid method: {method}"}
 
-                if response.status_code in [200, 201, 202]:
-                    try:
-                        return {"success": True, "data": response.json(), "status": response.status_code}
-                    except json.JSONDecodeError:
-                        return {"success": True, "data": response.text, "status": response.status_code}
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Grafana API error: {response.status_code} - {response.text}",
-                        "status": response.status_code
-                    }
-
-        import asyncio
-        return asyncio.run(_make_request())
+            if response.status_code in [200, 201, 202]:
+                try:
+                    return {"success": True, "data": response.json(), "status": response.status_code}
+                except json.JSONDecodeError:
+                    return {"success": True, "data": response.text, "status": response.status_code}
+            else:
+                return {
+                    "success": False,
+                    "error": f"Grafana API error: {response.status_code} - {response.text}",
+                    "status": response.status_code
+                }
 
     except httpx.ConnectError:
         return {
@@ -111,7 +107,7 @@ def _generate_dashboard_uid(service_name: str) -> str:
     return f"devrelagent-{service_name.lower().replace('_', '-').replace(' ', '-')}"
 
 
-def _get_datasource_uid(datasource_name: str) -> Optional[str]:
+async def _get_datasource_uid(datasource_name: str) -> Optional[str]:
     """
     Get datasource UID from Grafana.
 
@@ -121,7 +117,7 @@ def _get_datasource_uid(datasource_name: str) -> Optional[str]:
     Returns:
         Datasource UID or None
     """
-    result = _grafana_request("GET", "/datasources")
+    result = await _grafana_request("GET", "/datasources")
 
     if not result.get("success"):
         return None
@@ -438,7 +434,7 @@ async def test_grafana_connection() -> Dict[str, Any]:
     Returns:
         Connection status with Grafana version and available datasources
     """
-    result = _grafana_request("GET", "/health")
+    result = await _grafana_request("GET", "/health")
 
     if not result.get("success"):
         return {
@@ -452,7 +448,7 @@ async def test_grafana_connection() -> Dict[str, Any]:
         }
 
     # Get datasources
-    datasources_result = _grafana_request("GET", "/datasources")
+    datasources_result = await _grafana_request("GET", "/datasources")
 
     return {
         "success": True,
@@ -477,7 +473,7 @@ async def list_grafana_datasources() -> Dict[str, Any]:
     Returns:
         List of datasources with names, types, and UIDs
     """
-    result = _grafana_request("GET", "/datasources")
+    result = await _grafana_request("GET", "/datasources")
 
     if not result.get("success"):
         return result
@@ -539,7 +535,7 @@ async def create_service_dashboard(
     datasource = datasource_name or GRAFANA_DEFAULT_DATASOURCE
 
     # Get datasource UID
-    datasource_uid = _get_datasource_uid(datasource)
+    datasource_uid = await _get_datasource_uid(datasource)
 
     if not datasource_uid:
         return {
@@ -557,7 +553,7 @@ async def create_service_dashboard(
     )
 
     # Create dashboard in Grafana
-    result = _grafana_request("POST", "/dashboards/db", dashboard_json)
+    result = await _grafana_request("POST", "/dashboards/db", dashboard_json)
 
     if not result.get("success"):
         return result
@@ -616,7 +612,7 @@ async def create_multi_service_dashboard(
         }
 
     datasource = datasource_name or GRAFANA_DEFAULT_DATASOURCE
-    datasource_uid = _get_datasource_uid(datasource)
+    datasource_uid = await _get_datasource_uid(datasource)
 
     if not datasource_uid:
         return {
@@ -630,7 +626,7 @@ async def create_multi_service_dashboard(
         dashboard_title=dashboard_title
     )
 
-    result = _grafana_request("POST", "/dashboards/db", dashboard_json)
+    result = await _grafana_request("POST", "/dashboards/db", dashboard_json)
 
     if not result.get("success"):
         return result
@@ -668,7 +664,7 @@ async def export_dashboard_json(
     Returns:
         Dashboard JSON content
     """
-    result = _grafana_request("GET", f"/dashboards/uid/{dashboard_uid}")
+    result = await _grafana_request("GET", f"/dashboards/uid/{dashboard_uid}")
 
     if not result.get("success"):
         return result
@@ -734,7 +730,7 @@ async def import_dashboard_json(
             "overwrite": overwrite
         }
 
-        result = _grafana_request("POST", "/dashboards/db", dashboard_json)
+        result = await _grafana_request("POST", "/dashboards/db", dashboard_json)
 
         if not result.get("success"):
             return result
@@ -790,7 +786,7 @@ async def list_dashboards(
     if tag_filter:
         params["tag"] = tag_filter
 
-    result = _grafana_request("GET", "/search", params)
+    result = await _grafana_request("GET", "/search", params)
 
     if not result.get("success"):
         return result
@@ -837,7 +833,7 @@ async def delete_dashboard(
     Returns:
         Deletion result
     """
-    result = _grafana_request("DELETE", f"/dashboards/uid/{dashboard_uid}")
+    result = await _grafana_request("DELETE", f"/dashboards/uid/{dashboard_uid}")
 
     if not result.get("success"):
         return result

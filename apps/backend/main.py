@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from routes.chat import router as chat_router, start_cleanup_task
 from routes.dashboard import router as dashboard_router
 from routes.approvals import router as approvals_router
+from routes.audit import router as audit_router
 from tools.registry import get_registry
 from tools.clickhouse_tool import get_clickhouse_tool
 from guardrails.approval_guard import get_approval_guard
@@ -246,6 +247,7 @@ async def health_check():
 app.include_router(chat_router, tags=["chat"])
 app.include_router(dashboard_router, tags=["dashboard"])
 app.include_router(approvals_router, tags=["approvals"])
+app.include_router(audit_router, tags=["audit"])
 
 
 # ─── Root ──────────────────────────────────────────────
@@ -263,6 +265,12 @@ async def root():
             "dashboard": "/dashboard",
             "dashboard_stream": "/dashboard/stream",
             "approvals": "/approvals",
+            "audit": "/audit",
+            "audit_recent": "/audit/recent",
+            "audit_session": "/audit/session/{session_id}",
+            "audit_query": "/audit/query",
+            "audit_summary": "/audit/summary",
+            "audit_export": "/audit/export",
             "docs": "/docs",
         },
         "tools": get_registry().list_tool_names(),

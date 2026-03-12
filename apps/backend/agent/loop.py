@@ -1,14 +1,16 @@
 """
-Agent Loop — Core Cognitive Pipeline with Tool Integration
+Agent Loop — Core Cognitive Pipeline with Tool Integration and Guardrails
 
-Implements: Perception → Routing → Memory → Action → Response
+Implements: Guardrails → Perception → Routing → Memory → Action → Response → Guardrails
 
 This is the main orchestration module. Each cognitive layer is a step:
+0. Guardrails: Input validation (topic, PII, injection detection)
 1. Perception: Parse user query, extract intent and entities
 2. Routing: Classify intent, select tool(s) using registry
 3. Memory: Check conversation history, KeDB, RAG for context
-4. Action: Execute selected tool(s)
+4. Action: Execute selected tool(s) with tool guardrails
 5. Response: Generate final response with tool results
+6. Output Guardrails: Validate response (SQL safety, grounding, HITL)
 
 Usage:
     from agent.loop import AgentLoop
@@ -34,8 +36,31 @@ from models.schemas import (
     PerceptionResult,
     SessionContext,
     ToolCallResult,
+    StructuredAgentResponse,
+    AgentObservation,
+    EvidenceItem,
 )
 from tools.registry import get_registry, ToolRegistry, ToolCategory
+
+# Import guardrails
+from guardrails.input_guard import (
+    get_input_guardrail,
+    InputGuardrail,
+    GuardrailResult as InputGuardrailResult,
+    TopicCategory,
+)
+from guardrails.output_guard import (
+    get_output_guardrail,
+    OutputGuardrail,
+    OutputValidationResult,
+    GroundingStatus,
+)
+from guardrails.tool_guard import (
+    get_tool_guardrail,
+    ToolGuardrail,
+    ToolExecutionResult as GuardedToolResult,
+    ToolCategory as GuardToolCategory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +73,18 @@ def log(stage: str, msg: str):
 
 class AgentLoop:
     """
-    Enhanced agent loop with tool integration.
+    Enhanced agent loop with tool integration and guardrails.
 
     Features:
+    - Input guardrails (topic filter, PII scrubber, injection detection)
     - Intent-based routing to tools
+    - Tool guardrails (rate limiting, timeout, scope restriction)
     - Tool execution with error handling
+    - Output guardrails (SQL safety, grounding check, HITL gate)
     - Streaming response generation
     - Conversation memory management
     - LLM response synthesis with tool results
+    - Audit logging for compliance
     """
 
     def __init__(
@@ -63,18 +92,39 @@ class AgentLoop:
         max_steps: int = 10,
         tool_registry: Optional[ToolRegistry] = None,
         enable_tools: bool = True,
+        enable_input_guardrails: bool = True,
+        enable_output_guardrails: bool = True,
+        enable_tool_guardrails: bool = True,
+        input_guardrail: Optional[InputGuardrail] = None,
+        output_guardrail: Optional[OutputGuardrail] = None,
+        tool_guardrail: Optional[ToolGuardrail] = None,
     ):
         """
-        Initialize agent loop.
+        Initialize agent loop with guardrails.
 
         Args:
             max_steps: Maximum reasoning steps
             tool_registry: Tool registry (uses default if None)
             enable_tools: Enable/disable tool execution
+            enable_input_guardrails: Enable input validation
+            enable_output_guardrails: Enable output validation
+            enable_tool_guardrails: Enable tool execution protection
+            input_guardrail: Custom input guardrail (uses default if None)
+            output_guardrail: Custom output guardrail (uses default if None)
+            tool_guardrail: Custom tool guardrail (uses default if None)
         """
         self.max_steps = max_steps
         self.enable_tools = enable_tools
         self.registry = tool_registry or get_registry()
+
+        # Guardrails
+        self.enable_input_guardrails = enable_input_guardrails
+        self.enable_output_guardrails = enable_output_guardrails
+        self.enable_tool_guardrails = enable_tool_guardrails
+
+        self.input_guardrail = input_guardrail or get_input_guardrail()
+        self.output_guardrail = output_guardrail or get_output_guardrail()
+        self.tool_guardrail = tool_guardrail or get_tool_guardrail()
 
         # Register clickhouse_query tool if not already registered
         self._register_default_tools()
@@ -82,11 +132,27 @@ class AgentLoop:
         # Per-instance conversation history
         self.conversation_history: List[Dict[str, str]] = []
 
+        # Guardrail statistics
+        self.guardrail_stats = {
+            "input_validations": 0,
+            "input_rejected": 0,
+            "output_validations": 0,
+            "output_rejected": 0,
+            "tool_executions": 0,
+            "tool_guardrail_blocks": 0,
+        }
+
         logger.info(f"AgentLoop initialized with {len(self.registry.tool_names)} tools")
+        logger.info(f"Input guardrails: {'enabled' if enable_input_guardrails else 'disabled'}")
+        logger.info(f"Output guardrails: {'enabled' if enable_output_guardrails else 'disabled'}")
+        logger.info(f"Tool guardrails: {'enabled' if enable_tool_guardrails else 'disabled'}")
 
     def _register_default_tools(self):
         """Register default tools if they haven't been registered yet."""
-        # Register ClickHouse query tool
+        tools_registered = []
+        tools_failed = []
+        
+        # 1. Register ClickHouse query tool
         if "clickhouse_query" not in self.registry.tool_names:
             try:
                 from tools.clickhouse_tool import get_clickhouse_tool
@@ -107,10 +173,138 @@ class AgentLoop:
                     },
                     category=ToolCategory.DATABASE_QUERY,
                 )
+                tools_registered.append("clickhouse_query")
                 logger.info("✅ Registered clickhouse_query tool")
 
             except Exception as e:
+                tools_failed.append(f"clickhouse_query: {e}")
                 logger.warning(f"⚠️ Failed to register clickhouse_query tool: {e}")
+        
+        # 2. Register GitHub tools
+        if "draft_github_issue" not in self.registry.tool_names:
+            try:
+                from tools.github_tool import draft_github_issue, create_github_pr
+                
+                self.registry.register_manual(
+                    name="draft_github_issue",
+                    handler=draft_github_issue,
+                    description="Draft a GitHub issue with title, body, labels, and assignees (requires HITL approval)",
+                    parameters={
+                        "repo": {"type": "string", "description": "Repository in format 'owner/repo'"},
+                        "title": {"type": "string", "description": "Issue title"},
+                        "body": {"type": "string", "description": "Issue body/description in markdown"},
+                        "labels": {"type": "array", "description": "List of labels to add"},
+                        "assignees": {"type": "array", "description": "List of usernames to assign"}
+                    },
+                    category=ToolCategory.API,
+                    requires_approval=True,
+                    approval_action_type="github_issue",
+                    read_only=False,
+                    risk_level="medium",
+                )
+                tools_registered.append("draft_github_issue")
+                logger.info("✅ Registered draft_github_issue tool")
+                
+            except Exception as e:
+                tools_failed.append(f"draft_github_issue: {e}")
+                logger.warning(f"⚠️ Failed to register draft_github_issue tool: {e}")
+        
+        # 3. Register Grafana dashboard tools
+        if "create_grafana_dashboard" not in self.registry.tool_names:
+            try:
+                from tools.grafana_tool import create_service_dashboard, test_grafana_connection
+                
+                self.registry.register_manual(
+                    name="create_grafana_dashboard",
+                    handler=create_service_dashboard,
+                    description="Create a Grafana dashboard for a service with monitoring panels (requires HITL approval)",
+                    parameters={
+                        "service_name": {"type": "string", "description": "Name of the service to monitor"},
+                        "datasource_name": {"type": "string", "description": "Grafana datasource name"},
+                        "dashboard_title": {"type": "string", "description": "Dashboard title"}
+                    },
+                    category=ToolCategory.API,
+                    requires_approval=True,
+                    approval_action_type="grafana_dashboard",
+                    read_only=False,
+                    risk_level="low",
+                )
+                tools_registered.append("create_grafana_dashboard")
+                logger.info("✅ Registered create_grafana_dashboard tool")
+                
+            except Exception as e:
+                tools_failed.append(f"create_grafana_dashboard: {e}")
+                logger.warning(f"⚠️ Failed to register create_grafana_dashboard tool: {e}")
+        
+        # 4. Register code search tools (if repos are indexed)
+        if "search_code" not in self.registry.tool_names:
+            try:
+                from tools.code_search.mcp_server import search_code, get_file_content, list_files
+                
+                self.registry.register_manual(
+                    name="search_code",
+                    handler=search_code,
+                    description="Search code semantically using natural language queries",
+                    parameters={
+                        "query": {"type": "string", "description": "Natural language code search query"},
+                        "top_k": {"type": "integer", "description": "Number of results to return"}
+                    },
+                    category=ToolCategory.CODE_SEARCH,
+                )
+                tools_registered.append("search_code")
+                logger.info("✅ Registered search_code tool")
+                
+            except Exception as e:
+                tools_failed.append(f"search_code: {e}")
+                logger.warning(f"⚠️ Failed to register search_code tool: {e}")
+        
+        # 5. Register gap detection tool
+        if "detect_gaps" not in self.registry.tool_names:
+            try:
+                from tools.gap_detection_tool import detect_gaps
+                
+                self.registry.register_manual(
+                    name="detect_gaps",
+                    handler=detect_gaps,
+                    description="Detect missing documentation or code gaps in the project",
+                    parameters={
+                        "area": {"type": "string", "description": "Area to check for gaps (e.g., 'authentication', 'api')"}
+                    },
+                    category=ToolCategory.UTILITY,
+                )
+                tools_registered.append("detect_gaps")
+                logger.info("✅ Registered detect_gaps tool")
+                
+            except Exception as e:
+                tools_failed.append(f"detect_gaps: {e}")
+                logger.warning(f"⚠️ Failed to register detect_gaps tool: {e}")
+        
+        # 6. Register observability tool
+        if "get_observability" not in self.registry.tool_names:
+            try:
+                from tools.observability_tool import get_service_health
+                
+                self.registry.register_manual(
+                    name="get_observability",
+                    handler=get_service_health,
+                    description="Get observability metrics for a service (errors, latency, throughput)",
+                    parameters={
+                        "service_name": {"type": "string", "description": "Name of the service"},
+                        "time_range": {"type": "string", "description": "Time range (e.g., '1h', '24h')"}
+                    },
+                    category=ToolCategory.DATABASE_QUERY,
+                )
+                tools_registered.append("get_observability")
+                logger.info("✅ Registered get_observability tool")
+                
+            except Exception as e:
+                tools_failed.append(f"get_observability: {e}")
+                logger.warning(f"⚠️ Failed to register get_observability tool: {e}")
+        
+        # Log summary
+        logger.info(f"📊 Tool registration complete: {len(tools_registered)} registered, {len(tools_failed)} failed")
+        if tools_failed:
+            logger.warning(f"⚠️ Failed tools: {tools_failed}")
 
     async def process(
         self,
@@ -136,7 +330,7 @@ class AgentLoop:
         session: Optional[SessionContext] = None,
     ) -> tuple[str, Optional[List[ToolCallResult]]]:
         """
-        Process a user query with tool execution.
+        Process a user query with tool execution and guardrails.
 
         Args:
             user_input: Raw user input text
@@ -148,8 +342,26 @@ class AgentLoop:
         log("agent", f"Processing: {user_input[:100]}...")
 
         tool_calls: List[ToolCallResult] = []
+        input_validation: Optional[InputGuardrailResult] = None
 
         try:
+            # 0. Input Guardrails
+            if self.enable_input_guardrails:
+                self.guardrail_stats["input_validations"] += 1
+                input_validation = await self.input_guardrail.validate(user_input)
+
+                if not input_validation.is_valid:
+                    self.guardrail_stats["input_rejected"] += 1
+                    logger.warning(f"Input rejected by guardrail: {input_validation.reason}")
+
+                    # Return friendly error message
+                    error_response = self._get_guardrail_error_message(input_validation)
+                    return error_response, None
+
+                # Use sanitized input
+                user_input = input_validation.sanitized_text
+                log("guardrail", f"Input validated - Topic: {input_validation.topic}, PII found: {len(input_validation.pii_found)}")
+
             # 1. Perception
             perception = self._perceive(user_input)
             log("agent", f"Intent: {perception.intent}, tool_hint: {perception.tool_hint}")
@@ -158,27 +370,69 @@ class AgentLoop:
             tool_name = self._route_to_tool(perception, session)
             log("agent", f"Routed to tool: {tool_name}")
 
-            # 3. Execute tool if available
+            # 3. Explain before act (generate explanation before execution)
+            tool_explanation = None
+            if tool_name and self.enable_tools:
+                tool_explanation = await self._explain_before_act(tool_name, perception, session)
+                if tool_explanation:
+                    log("agent", f"Tool explanation: {tool_explanation.get('action', 'N/A')}")
+
+            # 4. Execute tool if available (with tool guardrails)
             tool_result = None
             if tool_name and self.enable_tools:
-                tool_result = await self._execute_tool(tool_name, perception, session)
+                tool_result = await self._execute_tool_with_guardrails(tool_name, perception, session)
                 if tool_result:
                     tool_calls.append(tool_result)
                     log("agent", f"Tool {tool_name} executed: {tool_result.success}")
 
-            # 4. Generate response with tool results
-            response = await self._generate_response(
+            # 5. Generate structured response with tool results
+            structured_response = await self._generate_structured_response(
                 user_input,
                 perception,
                 tool_result,
                 session,
+                tool_name,
+                tool_explanation,
             )
+
+            # 5. Output Guardrails
+            if self.enable_output_guardrails:
+                self.guardrail_stats["output_validations"] += 1
+
+                # Build context for grounding check
+                context = {
+                    "evidence": [str(tc.result) for tc in tool_calls if tc.success and tc.result] if tool_calls else [],
+                    "conversation": self.conversation_history[-5:] if self.conversation_history else [],
+                }
+
+                output_validation = await self.output_guardrail.validate(
+                    response=structured_response.summary,
+                    context=context,
+                    tool_results=[tc.__dict__ if hasattr(tc, '__dict__') else str(tc) for tc in tool_calls] if tool_calls else None,
+                    action=tool_name,
+                )
+
+                if not output_validation.is_valid:
+                    self.guardrail_stats["output_rejected"] += 1
+                    logger.warning(f"Output rejected by guardrail: {output_validation.reason}")
+
+                    # Modify response to indicate validation issue
+                    if output_validation.hitl_required:
+                        structured_response.summary += "\n\n[Note: This action requires human approval before execution.]"
+                    else:
+                        structured_response.summary = f"I apologize, but I cannot provide that response due to safety validation: {output_validation.reason}"
+
+                    # Update certainty level based on validation
+                    structured_response.certainty_level = "uncertain"
+
+                log("guardrail", f"Output validated - Grounding: {output_validation.grounding_status.value}, SQL Safe: {output_validation.sql_safe}")
 
             # Update instance history
             self.conversation_history.append({"role": "user", "content": user_input})
-            self.conversation_history.append({"role": "assistant", "content": response})
+            self.conversation_history.append({"role": "assistant", "content": structured_response.summary})
 
-            return response, tool_calls
+            # Return plain text response for backward compatibility
+            return structured_response.summary, tool_calls
 
         except Exception as e:
             logger.error(f"Agent processing error: {e}")
@@ -342,18 +596,39 @@ class AgentLoop:
         session: Optional[SessionContext],
     ) -> Optional[str]:
         """
-        Route intent to appropriate tool or skill.
+        Route intent to appropriate tool or skill with confidence-based enforcement.
 
-        Uses the router to classify and the registry to find tools/skills.
+        Uses the router to classify with confidence and the registry to find tools/skills.
+        Returns None for unknown intents or low confidence, triggering fallback responses.
         """
         if not self.enable_tools:
             return None
 
+        # Classify intent with confidence
+        intent, confidence = classify_intent(perception)
+
+        # Store confidence in perception for later use
+        perception.confidence = confidence
+
+        # Handle unknown intent or low confidence
+        if intent == "unknown":
+            logger.warning(f"Unknown intent detected for: {perception.user_input[:50]}...")
+            return None
+
+        # Low confidence threshold (below 0.6)
+        if confidence < 0.6:
+            logger.warning(f"Low confidence ({confidence:.2f}) for intent '{intent}': {perception.user_input[:50]}...")
+            # Store fallback suggestions in perception
+            from agent.router import get_fallback_suggestions
+            perception.fallback_suggestions = get_fallback_suggestions(perception.user_input)
+            return None
+
+        # High confidence routing
         # First, check for skill routing
         from skills import get_skill_registry
         skill_registry = get_skill_registry()
-        
-        skill_name = skill_registry.route_by_intent(perception.intent)
+
+        skill_name = skill_registry.route_by_intent(intent)
         if skill_name:
             skill = skill_registry.get(skill_name)
             if skill:
@@ -366,7 +641,7 @@ class AgentLoop:
                 return perception.tool_hint
 
         # Fallback to intent-based routing for tools
-        tool_name = self.registry.route_by_intent(perception.intent)
+        tool_name = self.registry.route_by_intent(intent)
         if tool_name:
             tool = self.registry.get(tool_name)
             if tool and tool.metadata.enabled:
@@ -434,7 +709,161 @@ class AgentLoop:
                 success=False,
                 error=str(e),
             )
-    
+
+    async def _execute_tool_with_guardrails(
+        self,
+        tool_name: str,
+        perception: PerceptionResult,
+        session: Optional[SessionContext],
+    ) -> Optional[ToolCallResult]:
+        """
+        Execute a tool with tool guardrails (rate limiting, timeout, scope).
+
+        Args:
+            tool_name: Name of tool to execute
+            perception: Perception result with entities
+            session: Optional session context
+
+        Returns:
+            ToolCallResult or None
+        """
+        tool = self.registry.get(tool_name)
+        if not tool:
+            logger.warning(f"Tool not found: {tool_name}")
+            return None
+
+        # Build arguments from perception
+        arguments = self._build_tool_arguments(tool_name, perception, session)
+
+        # Get tool category for guardrails
+        tool_category = self._get_tool_category(tool_name)
+
+        # Execute with tool guardrails
+        if self.enable_tool_guardrails:
+            self.guardrail_stats["tool_executions"] += 1
+
+            async def tool_handler(args):
+                """Execute the tool."""
+                execution_result = await self.registry.execute_tool(
+                    tool_name,
+                    args,
+                    timeout_seconds=30,
+                )
+
+                # SQL Self-Correction for ClickHouse queries
+                if tool_name == "clickhouse_query" and not execution_result.success:
+                    execution_result = await self._retry_sql_with_correction(
+                        tool_name, args, execution_result.error
+                    )
+
+                return execution_result
+
+            # Execute with guardrails
+            guarded_result = await self.tool_guardrail.execute(
+                tool_name=tool_name,
+                handler=tool_handler,
+                arguments=arguments,
+                category=tool_category,
+                user_id=session.session_id if session else None,
+            )
+
+            # Log guardrail blocks
+            if not guarded_result.success and (
+                guarded_result.rate_limited or
+                guarded_result.timeout_occurred or
+                guarded_result.scope_violation or
+                guarded_result.circuit_breaker_open
+            ):
+                self.guardrail_stats["tool_guardrail_blocks"] += 1
+                logger.warning(
+                    f"Tool {tool_name} blocked by guardrail: "
+                    f"rate_limited={guarded_result.rate_limited}, "
+                    f"timeout={guarded_result.timeout_occurred}, "
+                    f"scope_violation={guarded_result.scope_violation}, "
+                    f"circuit_breaker={guarded_result.circuit_breaker_open}"
+                )
+
+            return ToolCallResult(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=guarded_result.result,
+                success=guarded_result.success,
+                error=guarded_result.error,
+                metadata={
+                    "guardrail_info": {
+                        "rate_limited": guarded_result.rate_limited,
+                        "timeout_occurred": guarded_result.timeout_occurred,
+                        "scope_violation": guarded_result.scope_violation,
+                        "circuit_breaker_open": guarded_result.circuit_breaker_open,
+                        "execution_time_ms": guarded_result.execution_time_ms,
+                    }
+                }
+            )
+        else:
+            # Execute without guardrails (legacy behavior)
+            return await self._execute_tool(tool_name, perception, session)
+
+    def _get_tool_category(self, tool_name: str) -> Optional[GuardToolCategory]:
+        """
+        Map tool name to guardrail tool category.
+
+        Args:
+            tool_name: Name of the tool
+
+        Returns:
+            ToolCategory or None
+        """
+        category_mapping = {
+            "clickhouse_query": GuardToolCategory.DATABASE_QUERY,
+            "grafana_dashboard": GuardToolCategory.GRAFANA,
+            "github_issue": GuardToolCategory.GITHUB,
+            "browser_action": GuardToolCategory.BROWSER,
+            "code_search": GuardToolCategory.CODE_READ,
+            "rag_search": GuardToolCategory.NETWORK_READ,
+        }
+        return category_mapping.get(tool_name)
+
+    def _get_guardrail_error_message(self, validation_result: InputGuardrailResult) -> str:
+        """
+        Generate user-friendly error message for guardrail rejection.
+
+        Args:
+            validation_result: Input guardrail validation result
+
+        Returns:
+            User-friendly error message
+        """
+        if validation_result.injection_detected:
+            return (
+                "I'm unable to process that request as it appears to contain "
+                "potentially unsafe instructions. Please rephrase your question."
+            )
+
+        if validation_result.topic and validation_result.topic == "out_of_scope":
+            return (
+                "I specialize in developer relations and technical support topics. "
+                "I can help with questions about code, documentation, APIs, databases, "
+                "observability, and related technical subjects. How can I assist you?"
+            )
+
+        if validation_result.pii_found:
+            pii_types = set(pii["type"] for pii in validation_result.pii_found)
+            sensitive_types = {"aws_key", "private_key", "jwt_token", "api_token"}
+            
+            if pii_types & sensitive_types:
+                return (
+                    "I detected sensitive credentials in your message. For security reasons, "
+                    "please avoid sharing API keys, tokens, or passwords. "
+                    "You can describe your issue without including the actual credentials."
+                )
+
+        # Generic rejection message
+        return (
+            "I'm unable to process that request due to safety guidelines. "
+            "Please rephrase your question or contact support for assistance. "
+            f"Reason: {validation_result.reason}"
+        )
+
     async def _execute_skill(
         self,
         skill_name: str,
@@ -682,7 +1111,7 @@ class AgentLoop:
         session: Optional[SessionContext],
     ) -> str:
         """
-        Generate response using LLM with tool results.
+        Generate response using LLM with tool results and confidence-based handling.
 
         Args:
             user_input: Original user input
@@ -694,6 +1123,10 @@ class AgentLoop:
             Generated response string
         """
         try:
+            # Handle unknown intent or low confidence
+            if hasattr(perception, 'confidence') and perception.confidence < 0.6:
+                return self._generate_low_confidence_response(perception, user_input)
+
             # Build context
             context_parts = [f"User asked: {user_input}"]
 
@@ -732,6 +1165,267 @@ class AgentLoop:
         except Exception as e:
             logger.error(f"Response generation failed: {e}")
             return "I apologize, but I encountered an error generating my response."
+
+    async def _generate_structured_response(
+        self,
+        user_input: str,
+        perception: PerceptionResult,
+        tool_result: Optional[ToolCallResult],
+        session: Optional[SessionContext],
+        tool_name: Optional[str],
+        tool_explanation: Optional[Dict[str, Any]] = None,
+    ) -> StructuredAgentResponse:
+        """
+        Generate structured response with observations, confidence scoring, and explanation.
+
+        Args:
+            user_input: Original user input
+            perception: Perception result
+            tool_result: Result from tool execution
+            session: Optional session context
+            tool_name: Name of tool used
+            tool_explanation: Optional tool explanation generated before execution
+
+        Returns:
+            StructuredAgentResponse with observations and confidence
+        """
+        try:
+            # Handle unknown intent or low confidence
+            if hasattr(perception, 'confidence') and perception.confidence < 0.6:
+                return self._generate_structured_low_confidence_response(perception, user_input)
+
+            # Generate observations from tool results
+            observations = []
+            confidence = 0.7  # Base confidence
+
+            if tool_result and tool_result.success:
+                # Create observation from tool result
+                observation = await self._create_observation_from_tool_result(
+                    tool_result,
+                    user_input,
+                )
+                if observation:
+                    observations.append(observation)
+                    confidence = max(confidence, observation.confidence)
+
+            # Generate response text
+            response_text = await self._generate_response(
+                user_input,
+                perception,
+                tool_result,
+                session,
+            )
+
+            # Add explanation to response if tool requires approval
+            if tool_explanation and tool_explanation.get('requires_approval'):
+                explanation_text = (
+                    f"\n\n**Before executing**, here's what I plan to do:\n"
+                    f"- **Action**: {tool_explanation.get('action', 'N/A')}\n"
+                    f"- **Reasoning**: {tool_explanation.get('reasoning', 'N/A')}\n"
+                    f"- **Expected Outcome**: {tool_explanation.get('expected_outcome', 'N/A')}\n"
+                    f"- **Risk Level**: {tool_explanation.get('risk_level', 'unknown').upper()}"
+                )
+                response_text = explanation_text + "\n\n" + response_text
+
+            # Determine certainty level
+            if confidence >= 0.9:
+                certainty_level = "confirmed"
+            elif confidence >= 0.7:
+                certainty_level = "likely"
+            elif confidence >= 0.5:
+                certainty_level = "possible"
+            else:
+                certainty_level = "uncertain"
+
+            # Determine query type
+            if tool_name:
+                query_type = "investigation" if tool_name in ["clickhouse_query", "observability"] else "question"
+            else:
+                query_type = "question"
+
+            # Build structured response
+            structured_response = StructuredAgentResponse(
+                query=user_input,
+                query_type=query_type,
+                summary=response_text,
+                detailed_explanation=response_text,  # For now, same as summary
+                observations=observations,
+                tools_used=[tool_name] if tool_name else [],
+                data_sources=["clickhouse"] if tool_name == "clickhouse_query" else [],
+                confidence=confidence,
+                certainty_level=certainty_level,
+                next_steps=[],
+                suggested_actions=[],
+                supporting_data={
+                    "tool_explanation": tool_explanation,
+                    "tool_requires_approval": tool_explanation.get('requires_approval', False) if tool_explanation else False,
+                    "tool_risk_level": tool_explanation.get('risk_level') if tool_explanation else None,
+                } if tool_explanation else {},
+            )
+
+            return structured_response
+
+        except Exception as e:
+            logger.error(f"Structured response generation failed: {e}")
+            # Return minimal structured response on error
+            return StructuredAgentResponse(
+                query=user_input,
+                summary="I encountered an error generating my response.",
+                confidence=0.0,
+                certainty_level="uncertain",
+            )
+
+    async def _create_observation_from_tool_result(
+        self,
+        tool_result: ToolCallResult,
+        user_input: str,
+    ) -> Optional[AgentObservation]:
+        """
+        Create an observation from tool result.
+
+        Args:
+            tool_result: Tool execution result
+            user_input: Original user query
+
+        Returns:
+            AgentObservation or None
+        """
+        try:
+            # Determine observation type based on tool and result
+            observation_type = "insight"
+            impact = "low"
+            confidence = 0.7
+
+            if tool_result.tool_name == "clickhouse_query":
+                observation_type = "pattern"
+                impact = "medium"
+                confidence = 0.8
+
+                # Check if result contains error information
+                result_str = str(tool_result.result)
+                if "error" in result_str.lower() or "fail" in result_str.lower():
+                    observation_type = "anomaly"
+                    impact = "high"
+
+            # Create evidence item
+            evidence = EvidenceItem(
+                source=tool_result.tool_name,
+                data={"result": tool_result.result} if tool_result.result else {},
+                confidence=confidence,
+            )
+
+            # Build observation
+            observation = AgentObservation(
+                observation_type=observation_type,
+                title=f"Analysis from {tool_result.tool_name}",
+                description=f"Executed {tool_result.tool_name} to investigate: {user_input[:100]}",
+                evidence=[evidence],
+                impact=impact,
+                confidence=confidence,
+                certainty_level="likely" if confidence >= 0.7 else "possible",
+                suggested_actions=[],
+                priority="normal" if impact == "low" else "urgent",
+            )
+
+            return observation
+
+        except Exception as e:
+            logger.error(f"Failed to create observation from tool result: {e}")
+            return None
+
+    def _generate_structured_low_confidence_response(
+        self,
+        perception: PerceptionResult,
+        user_input: str,
+    ) -> StructuredAgentResponse:
+        """
+        Generate structured response for low confidence or unknown intents.
+
+        Args:
+            perception: Perception result with fallback suggestions
+            user_input: Original user input
+
+        Returns:
+            StructuredAgentResponse with low confidence
+        """
+        confidence = getattr(perception, 'confidence', 0.0)
+        suggestions = getattr(perception, 'fallback_suggestions', [])
+
+        # Build response text
+        if confidence < 0.3:
+            summary = "I'm unable to determine what you're asking."
+        else:
+            summary = (
+                f"I'm not entirely sure what you need (confidence: {confidence:.0%}). "
+                "Could you please clarify your request?"
+            )
+
+        # Add fallback suggestions
+        if suggestions:
+            summary += "\n\nHere are some things I can help you with:"
+            for i, suggestion in enumerate(suggestions[:3], 1):
+                summary += f"\n{i}. **{suggestion['intent'].replace('_', ' ').title()}**"
+                summary += f"\n   - {suggestion['description']}"
+                if suggestion.get('examples'):
+                    examples = "', '".join(suggestion['examples'][:2])
+                    summary += f"\n   - Example: '{examples}'"
+
+        return StructuredAgentResponse(
+            query=user_input,
+            query_type="question",
+            summary=summary,
+            detailed_explanation=summary,
+            observations=[],
+            confidence=confidence,
+            certainty_level="uncertain",
+            suggested_actions=[s['intent'] for s in suggestions[:3]],
+            tags=["low_confidence", "unknown_intent"],
+        )
+
+    def _generate_low_confidence_response(
+        self,
+        perception: PerceptionResult,
+        user_input: str,
+    ) -> str:
+        """
+        Generate response for low confidence or unknown intents.
+
+        Provides helpful fallback suggestions when intent is unclear.
+
+        Args:
+            perception: Perception result with fallback suggestions
+            user_input: Original user input
+
+        Returns:
+            Low confidence response with suggestions
+        """
+        confidence = getattr(perception, 'confidence', 0.0)
+        suggestions = getattr(perception, 'fallback_suggestions', [])
+
+        # Build response
+        response_parts = []
+
+        if confidence < 0.3:
+            # Very low confidence - unknown intent
+            response_parts.append("I'm unable to determine what you're asking.")
+        else:
+            # Low confidence - unclear intent
+            response_parts.append(
+                f"I'm not entirely sure what you need (confidence: {confidence:.0%}). "
+                "Could you please clarify your request?"
+            )
+
+        # Add fallback suggestions if available
+        if suggestions:
+            response_parts.append("\n\nHere are some things I can help you with:")
+            for i, suggestion in enumerate(suggestions[:3], 1):
+                response_parts.append(f"\n{i}. **{suggestion['intent'].replace('_', ' ').title()}**")
+                response_parts.append(f"   - {suggestion['description']}")
+                if suggestion.get('examples'):
+                    examples = "', '".join(suggestion['examples'][:2])
+                    response_parts.append(f"   - Example: '{examples}'")
+
+        return "\n".join(response_parts)
 
     async def _generate_response_stream(
         self,

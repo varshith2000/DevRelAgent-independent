@@ -34,6 +34,10 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -63,14 +67,16 @@ class DevRelAgentCLI:
     - Audit logging
     """
 
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         """Initialize CLI."""
         self.agent = AgentLoop()
         self.store = get_investigation_store()
         self.dry_run = False
         self.auto_approve = False
         self.json_output = False
+        self.verbose = verbose
         self.audit_log = []
+        self.session_id = None
 
     def log_audit_event(self, event_type: str, data: Dict[str, Any]):
         """Log audit event."""
@@ -88,7 +94,8 @@ class DevRelAgentCLI:
         dry_run: bool = False,
         auto_approve: bool = False,
         json_output: bool = False,
-        save_investigation: bool = True
+        save_investigation: bool = True,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Run an investigation query.
@@ -104,8 +111,24 @@ class DevRelAgentCLI:
             Investigation results
         """
         try:
+            # Set session ID
+            if session_id:
+                self.session_id = session_id
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Using session ID: {session_id}")
+            else:
+                self.session_id = f"sess_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Created new session: {self.session_id}")
+
             # Create investigation state
             investigation_id = f"inv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            if self.verbose:
+                logger.info(f"[VERBOSE] Created investigation ID: {investigation_id}")
+                logger.info(f"[VERBOSE] Dry-run mode: {dry_run}")
+                logger.info(f"[VERBOSE] Auto-approve: {auto_approve}")
+                logger.info(f"[VERBOSE] Save investigation: {save_investigation}")
 
             investigation = InvestigationState(
                 investigation_id=investigation_id,
@@ -119,6 +142,7 @@ class DevRelAgentCLI:
             # Log audit event
             self.log_audit_event("investigation_started", {
                 "investigation_id": investigation_id,
+                "session_id": self.session_id,
                 "query": query,
                 "dry_run": dry_run,
                 "auto_approve": auto_approve
@@ -127,10 +151,20 @@ class DevRelAgentCLI:
             # Process query
             logger.info(f"Investigating: {query}")
 
+            if self.verbose:
+                logger.info(f"[VERBOSE] Processing query with agent loop...")
+                logger.info(f"[VERBOSE] Query length: {len(query)} characters")
+
             response_text, tool_calls = await self.agent.process_with_tools(
                 query,
-                session=None
+                session=self.session_id
             )
+
+            if self.verbose:
+                logger.info(f"[VERBOSE] Agent processing complete")
+                logger.info(f"[VERBOSE] Response length: {len(response_text)} characters")
+                if tool_calls:
+                    logger.info(f"[VERBOSE] Number of tool calls: {len(tool_calls)}")
 
             # Update investigation
             investigation.status = "completed"
@@ -305,17 +339,27 @@ class DevRelAgentCLI:
 
 async def cmd_investigate(args):
     """Handle investigate command."""
-    cli = DevRelAgentCLI()
+    cli = DevRelAgentCLI(verbose=args.verbose)
     cli.dry_run = args.dry_run
     cli.auto_approve = args.auto_approve
     cli.json_output = args.json
+    cli.session_id = args.session
+
+    if args.verbose:
+        logger.info("[VERBOSE] Starting investigation command")
+        logger.info(f"[VERBOSE] Query: {args.query}")
+        logger.info(f"[VERBOSE] Dry-run: {args.dry_run}")
+        logger.info(f"[VERBOSE] Auto-approve: {args.auto_approve}")
+        logger.info(f"[VERBOSE] JSON output: {args.json}")
+        logger.info(f"[VERBOSE] Session ID: {args.session}")
 
     result = await cli.investigate(
         query=args.query,
         dry_run=args.dry_run,
         auto_approve=args.auto_approve,
         json_output=args.json,
-        save_investigation=not args.dry_run
+        save_investigation=not args.dry_run,
+        session_id=args.session
     )
 
     if args.json:
@@ -326,9 +370,15 @@ async def cmd_investigate(args):
 
 async def cmd_status(args):
     """Handle status command."""
-    cli = DevRelAgentCLI()
+    cli = DevRelAgentCLI(verbose=args.verbose)
+
+    if args.verbose:
+        logger.info("[VERBOSE] Fetching agent status...")
 
     result = await cli.get_status()
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Status result success: {result.get('success')}")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -356,7 +406,10 @@ async def cmd_status(args):
 
 async def cmd_list_investigations(args):
     """Handle list-investigations command."""
-    cli = DevRelAgentCLI()
+    cli = DevRelAgentCLI(verbose=args.verbose)
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Listing investigations with status={args.status}, limit={args.limit}")
 
     result = await cli.list_investigations(
         status=args.status,
@@ -364,14 +417,23 @@ async def cmd_list_investigations(args):
         json_output=args.json
     )
 
+    if args.verbose:
+        logger.info(f"[VERBOSE] Found {result.get('total', 0)} investigations")
+
     return 0 if result.get("success") else 1
 
 
 async def cmd_export_audit(args):
     """Handle export-audit command."""
-    cli = DevRelAgentCLI()
+    cli = DevRelAgentCLI(verbose=args.verbose)
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Exporting audit log to {args.output or 'default file'}")
 
     result = await cli.export_audit_log(args.output)
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Export result: {result.get('success')}")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -390,13 +452,19 @@ async def cmd_grafana_test_connection(args):
     """Handle Grafana test-connection command."""
     from tools.grafana_tool import test_grafana_connection
 
+    if args.verbose:
+        logger.info("[VERBOSE] Testing Grafana connection...")
+
     result = await test_grafana_connection()
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Connection test result: {result.get('success')}")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n✅ Successfully connected to Grafana")
+            print(f"\n[OK] Successfully connected to Grafana")
             print(f"   URL: {result.get('grafana_url')}")
             print(f"   Version: {result.get('grafana_version')}")
             datasources = result.get("datasources", [])
@@ -404,7 +472,7 @@ async def cmd_grafana_test_connection(args):
             for ds in datasources:
                 print(f"      - {ds.get('name')} ({ds.get('type')})")
         else:
-            print(f"\n❌ Failed to connect to Grafana: {result.get('error')}")
+            print(f"\n[ERROR] Failed to connect to Grafana: {result.get('error')}")
             if "troubleshooting" in result:
                 print("\nTroubleshooting:")
                 for key, value in result["troubleshooting"].items():
@@ -417,7 +485,13 @@ async def cmd_grafana_list_datasources(args):
     """Handle Grafana list-datasources command."""
     from tools.grafana_tool import list_grafana_datasources
 
+    if args.verbose:
+        logger.info("[VERBOSE] Fetching Grafana datasources...")
+
     result = await list_grafana_datasources()
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Found {result.get('total', 0)} datasources")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -442,11 +516,17 @@ async def cmd_grafana_create_dashboard(args):
     """Handle Grafana create-dashboard command."""
     from tools.grafana_tool import create_service_dashboard
 
+    if args.verbose:
+        logger.info(f"[VERBOSE] Creating dashboard for service: {args.service}")
+
     result = await create_service_dashboard(
         service_name=args.service,
         datasource_name=args.datasource,
         dashboard_title=args.title
     )
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Dashboard creation result: {result.get('success')}")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -470,7 +550,13 @@ async def cmd_grafana_list_dashboards(args):
     """Handle Grafana list-dashboards command."""
     from tools.grafana_tool import list_dashboards
 
+    if args.verbose:
+        logger.info(f"[VERBOSE] Listing dashboards with tag filter: {args.tag}")
+
     result = await list_dashboards(tag_filter=args.tag)
+
+    if args.verbose:
+        logger.info(f"[VERBOSE] Found {result.get('total', 0)} dashboards")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -493,7 +579,13 @@ async def cmd_grafana_setup(args):
     """Handle Grafana setup command."""
     from tools.grafana_tool import get_setup_instructions
 
+    if args.verbose:
+        logger.info("[VERBOSE] Fetching Grafana setup instructions...")
+
     result = await get_setup_instructions()
+
+    if args.verbose:
+        logger.info("[VERBOSE] Setup instructions retrieved")
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -555,6 +647,15 @@ Examples:
   # Auto-approve all actions (use with caution)
   python cli.py investigate "Create dashboard" --auto-approve
 
+  # Verbose mode with detailed output
+  python cli.py investigate "API errors" --verbose
+
+  # Use specific session ID for continuity
+  python cli.py investigate "Follow up on previous issue" --session sess_20260311_120000
+
+  # Combined flags
+  python cli.py investigate "Check logs" --dry-run --verbose --json
+
   # Get agent status
   python cli.py status
 
@@ -587,6 +688,19 @@ Examples:
         help="Enable debug logging"
     )
 
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable verbose output with detailed information"
+    )
+
+    parser.add_argument(
+        "--session",
+        type=str,
+        default=None,
+        help="Specify session ID for investigation continuity"
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Investigate command
@@ -606,6 +720,12 @@ Examples:
         "--no-save",
         action="store_true",
         help="Don't save investigation"
+    )
+    inv_parser.add_argument(
+        "--session",
+        type=str,
+        default=None,
+        help="Session ID for investigation continuity (auto-generated if not provided)"
     )
 
     # Status command

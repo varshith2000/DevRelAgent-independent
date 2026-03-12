@@ -53,6 +53,8 @@ from models.schemas import (
 )
 from agent.loop import AgentLoop
 from tools.registry import get_registry
+from audit.logger import get_audit_logger
+from audit.schemas import AuditEntry, ActionType, DataAccessed
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +135,15 @@ async def chat(request: ChatRequest):
         # Get agent loop
         agent = get_agent_loop()
 
+        # Create audit entry
+        audit_logger = await get_audit_logger()
+        audit_entry = AuditEntry(
+            session_id=session.session_id,
+            action_type=ActionType.CHAT,
+            action_name="chat_message",
+            input_text=request.message,
+        )
+
         # Add user message to history
         session.messages.append({
             "role": "user",
@@ -143,7 +154,39 @@ async def chat(request: ChatRequest):
         # Process through agent
         logger.info(f"Processing message for session {session.session_id}: {request.message[:100]}...")
 
+        start_time = datetime.now()
         response_text, tool_calls = await agent.process_with_tools(request.message, session)
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+        # Update audit entry with results
+        audit_entry.output_text = response_text
+        audit_entry.total_processing_time_ms = processing_time
+
+        # Add tool call information to audit
+        if tool_calls:
+            for tool_call in tool_calls:
+                data_accessed = []
+                if hasattr(tool_call, 'tool_name') and tool_call.tool_name == 'clickhouse_query':
+                    data_accessed.append(DataAccessed(
+                        source="clickhouse",
+                        query_type="read"
+                    ))
+
+                # Update audit entry with tool call details
+                await audit_logger.log(AuditEntry(
+                    session_id=session.session_id,
+                    action_type=ActionType.TOOL_CALL,
+                    action_name="tool_execution",
+                    input_text=request.message,
+                    tool_name=tool_call.get('tool_name') if isinstance(tool_call, dict) else getattr(tool_call, 'tool_name', None),
+                    tool_arguments=tool_call.get('arguments') if isinstance(tool_call, dict) else getattr(tool_call, 'arguments', None),
+                    tool_success=tool_call.get('success', True) if isinstance(tool_call, dict) else getattr(tool_call, 'success', True),
+                    data_accessed=data_accessed,
+                    parent_audit_id=audit_entry.audit_id,
+                ))
+
+        # Log the main chat entry
+        await audit_logger.log(audit_entry)
 
         # Add assistant response to history
         session.messages.append({
@@ -164,6 +207,7 @@ async def chat(request: ChatRequest):
             metadata={
                 "message_count": len(session.messages),
                 "tool_call_count": len(tool_calls) if tool_calls else 0,
+                "audit_id": audit_entry.audit_id,
             },
         )
 

@@ -1,12 +1,12 @@
 """
-Router — Intent Classification
+Router — Intent Classification with Confidence Scoring
 
-Classifies user queries into intents and selects the appropriate tool/skill.
-Uses LLM-based routing for accurate intent classification.
+Classifies user queries into intents with confidence scores.
+Uses LLM-based routing for accurate intent classification with fallback handling.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, List
 from models.schemas import PerceptionResult
 from agent.llm_provider import llm_generate
 from tools.registry import get_registry
@@ -114,40 +114,42 @@ INTENT_DEFINITIONS = {
 }
 
 
-def classify_intent(perception: PerceptionResult) -> str:
+def classify_intent(perception: PerceptionResult) -> Tuple[str, float]:
     """
-    Classify the intent using LLM-based routing for accurate classification.
+    Classify the intent using LLM-based routing with confidence scoring.
 
     Args:
         perception: Analyzed user input
 
     Returns:
-        Intent name to execute
+        Tuple of (intent_name, confidence_score)
+        - intent_name: The classified intent (may be "unknown")
+        - confidence_score: Float between 0.0 and 1.0 indicating confidence
     """
-    # If we have a clear tool hint from perception, use it
+    # If we have a clear tool hint from perception, use it with high confidence
     if perception.tool_hint and perception.tool_hint in INTENT_DEFINITIONS:
         logger.info(f"Using tool hint: {perception.tool_hint}")
-        return perception.tool_hint
+        return perception.tool_hint, 0.95
 
-    # Use LLM for intent classification
+    # Use LLM for intent classification with confidence
     try:
-        intent = _classify_with_llm(perception.user_input)
-        logger.info(f"LLM classified intent: {intent}")
-        return intent
+        intent, confidence = _classify_with_llm(perception.user_input)
+        logger.info(f"LLM classified intent: {intent} with confidence: {confidence:.2f}")
+        return intent, confidence
     except Exception as e:
         logger.warning(f"LLM classification failed: {e}, falling back to keyword matching")
         return _classify_with_keywords(perception.user_input)
 
 
-def _classify_with_llm(user_input: str) -> str:
+def _classify_with_llm(user_input: str) -> Tuple[str, float]:
     """
-    Use LLM to classify the user's intent.
+    Use LLM to classify the user's intent with confidence scoring.
 
     Args:
         user_input: The user's query
 
     Returns:
-        Classified intent name
+        Tuple of (classified_intent_name, confidence_score)
     """
     # Build the intent classification prompt
     intent_options = []
@@ -158,21 +160,35 @@ def _classify_with_llm(user_input: str) -> str:
     intent_list = "\n".join(intent_options)
 
     system_prompt = """You are an expert intent classifier for a DevRel (Developer Relations) agent.
-Your job is to classify user queries into the most appropriate intent category.
+Your job is to classify user queries into the most appropriate intent category and provide a confidence score.
 
-Analyze the user's query and respond with ONLY the intent name (one word from the list below).
-Do not explain your reasoning - just return the intent name.
+Analyze the user's query and respond with BOTH:
+1. The intent name (one word from the list below)
+2. A confidence score between 0.0 and 1.0
+
+Format your response as: "intent_name|confidence_score"
+
+For example: "database_query|0.95" or "unknown|0.3"
+
+Confidence scoring guidelines:
+- 0.9-1.0: Clear, unambiguous match with multiple supporting keywords
+- 0.7-0.9: Good match with relevant keywords but some ambiguity
+- 0.5-0.7: Partial match, could be multiple intents
+- 0.3-0.5: Weak match, few or no relevant keywords
+- 0.0-0.3: No clear match, likely unknown or unsupported
 
 Available intents:
 {intent_list}
 
-If the query doesn't match any intent well, respond with "unknown"."""
+If the query doesn't match any intent well (confidence < 0.5), use "unknown" as the intent."""
 
-    user_prompt = f"""Classify this user query into one of the available intents:
+    user_prompt = f"""Classify this user query into one of the available intents with a confidence score:
 
 Query: "{user_input}"
 
-Intent:"""
+Response format: intent_name|confidence_score
+
+Classification:"""
 
     # Call LLM for classification
     response = llm_generate(
@@ -181,28 +197,48 @@ Intent:"""
         max_tokens=50
     )
 
-    # Clean and validate response
-    intent = response.strip().lower()
+    # Parse response
+    try:
+        parts = response.strip().split("|")
+        if len(parts) == 2:
+            intent = parts[0].strip().lower()
+            confidence = float(parts[1].strip())
+
+            # Clamp confidence to valid range
+            confidence = max(0.0, min(1.0, confidence))
+        else:
+            # Fallback if response format is wrong
+            intent = response.strip().lower()
+            confidence = 0.5  # Default medium confidence
+    except (ValueError, IndexError):
+        # Fallback if parsing fails
+        intent = response.strip().lower()
+        confidence = 0.5  # Default medium confidence
 
     # Validate against known intents
     if intent in INTENT_DEFINITIONS:
-        return intent
+        return intent, confidence
     else:
-        logger.warning(f"LLM returned unknown intent: {intent}, using unknown")
-        return "unknown"
+        logger.warning(f"LLM returned unknown intent: {intent}, using unknown with low confidence")
+        return "unknown", 0.2
 
 
-def _classify_with_keywords(user_input: str) -> str:
+def _classify_with_keywords(user_input: str) -> Tuple[str, float]:
     """
-    Fallback keyword-based intent classification.
+    Fallback keyword-based intent classification with confidence scoring.
 
     Args:
         user_input: The user's query
 
     Returns:
-        Classified intent name
+        Tuple of (classified_intent_name, confidence_score)
     """
     query_lower = user_input.lower()
+
+    # Track best match
+    best_intent = "unknown"
+    best_match_count = 0
+    best_confidence = 0.0
 
     # Check each intent's keywords
     for intent_name, intent_data in INTENT_DEFINITIONS.items():
@@ -215,11 +251,84 @@ def _classify_with_keywords(user_input: str) -> str:
         if "keywords" in intent_data:
             all_keywords.extend(intent_data["keywords"])
 
+        # Count keyword matches
+        match_count = 0
         for keyword in all_keywords:
             if keyword.lower() in query_lower:
-                return intent_name
+                match_count += 1
 
-    return "unknown"
+        # Update best match
+        if match_count > best_match_count:
+            best_match_count = match_count
+            best_intent = intent_name
+
+    # Calculate confidence based on match quality
+    if best_match_count == 0:
+        confidence = 0.0
+    elif best_match_count == 1:
+        confidence = 0.4  # Low confidence for single keyword match
+    elif best_match_count == 2:
+        confidence = 0.6  # Medium confidence
+    else:
+        confidence = 0.8  # High confidence for multiple matches
+
+    return best_intent, confidence
+
+
+def get_fallback_suggestions(user_input: str, top_n: int = 3) -> List[Dict[str, Any]]:
+    """
+    Get fallback suggestions when intent is unknown or confidence is low.
+
+    Args:
+        user_input: The user's query
+        top_n: Number of suggestions to return
+
+    Returns:
+        List of suggested intents with explanations
+    """
+    query_lower = user_input.lower()
+
+    suggestions = []
+
+    for intent_name, intent_data in INTENT_DEFINITIONS.items():
+        if intent_name == "unknown":
+            continue
+
+        # Calculate match score
+        score = 0.0
+        matched_keywords = []
+
+        all_keywords = []
+        all_keywords.extend(intent_data["examples"])
+        if "keywords" in intent_data:
+            all_keywords.extend(intent_data["keywords"])
+
+        for keyword in all_keywords:
+            if keyword.lower() in query_lower:
+                score += 0.3  # Increment score for each match
+                matched_keywords.append(keyword)
+
+        # Add score for partial word matches
+        query_words = set(query_lower.split())
+        for keyword in all_keywords:
+            keyword_words = set(keyword.lower().split())
+            overlap = query_words.intersection(keyword_words)
+            if overlap:
+                score += len(overlap) * 0.1
+
+        # Only include if there's some relevance
+        if score > 0:
+            suggestions.append({
+                "intent": intent_name,
+                "description": intent_data["description"],
+                "score": min(score, 1.0),  # Cap at 1.0
+                "matched_keywords": matched_keywords,
+                "examples": intent_data["examples"][:2]  # Show top 2 examples
+            })
+
+    # Sort by score and return top N
+    suggestions.sort(key=lambda x: x["score"], reverse=True)
+    return suggestions[:top_n]
 
 
 def get_tools_for_intent(intent: str) -> list:

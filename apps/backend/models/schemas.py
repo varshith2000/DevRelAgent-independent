@@ -24,6 +24,8 @@ class PerceptionResult(BaseModel):
     entities: List[str] = Field(default_factory=list)
     tool_hint: Optional[str] = None
     repo_url: Optional[str] = None
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Confidence score for intent classification")
+    fallback_suggestions: List[Dict[str, Any]] = Field(default_factory=list, description="Fallback suggestions when confidence is low")
 
 
 # ============== Memory Models ==============

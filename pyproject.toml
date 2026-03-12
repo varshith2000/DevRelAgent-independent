@@ -12,7 +12,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     # === LLM Providers (multi-provider support) ===
     "anthropic>=0.45.0", # Default LLM provider
-    "openai>=1.30.0", # Optional: OpenAI GPT-4o
+    "openai>=1.30.0", # Optional: OpenAI GPT-4o, also used for z.ai GLM
     "google-genai>=1.0.0", # Optional: Google Gemini
     # === Vector Search & Embeddings ===
     "faiss-cpu>=1.7.4",

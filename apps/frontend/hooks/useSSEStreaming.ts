@@ -14,6 +14,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { API_BASE_URL } from '../lib/api';
+import { authQueryParams } from '../lib/auth';
 
 interface SSEChunk {
     type: 'session_start' | 'token' | 'tool_call' | 'explanation' | 'error' | 'done';
@@ -69,6 +70,10 @@ export function useSSEStreaming(options: UseSSEStreamingOptions = {}): UseSSEStr
         url.searchParams.append('message', message);
         url.searchParams.append('session_id', sessionId);
         url.searchParams.append('include_tool_calls', 'true');
+        // EventSource cannot send headers, so carry the identity/project here.
+        for (const [key, value] of Object.entries(authQueryParams())) {
+            url.searchParams.set(key, value);
+        }
 
         let reconnectAttempts = 0;
 

@@ -39,6 +39,12 @@ dependencies = [
     "clickhouse-connect>=0.13.0",
     "sqlparse>=0.5.5",
     "apscheduler>=3.11.2",
+    # === Phase 1: system of record + identity ===
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "psycopg[binary]>=3.1.0",   # Postgres/Supabase driver for the system of record
+    "pyjwt[crypto]>=2.8.0",   # verifies Clerk/OIDC ID tokens
+    "redis>=5.0.0",           # shared session/rate-limit store (optional at runtime)
 ]
 
 [project.optional-dependencies]
@@ -107,7 +113,12 @@ mypy_path = "apps/backend"
 
 # Baseline: type-check the new central config package. Legacy modules are
 # added to this list as they are annotated (tracked in the plan, Phase 8).
-files = ["apps/backend/config"]
+files = [
+    "apps/backend/config",
+    "apps/backend/db",
+    "apps/backend/auth",
+    "apps/backend/sessions",
+]
 ignore_missing_imports = true
 follow_imports = "silent"
 warn_unused_ignores = false

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { MessageBubble } from './MessageBubble';
 import { SqlSandbox } from './SqlSandbox';
 import { DashboardFeed } from './DashboardFeed';
-import { apiUrl } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 interface Message {
     id: string;
@@ -193,7 +193,7 @@ export function FullChat() {
                 messageToSend += `\n\n[Files attached: ${fileList}]\n\nNote: I've attached these files for analysis. Please let me know if you can help me analyze them or if I need to upload them to a specific location.`;
             }
 
-            const response = await fetch(apiUrl('/chat'), {
+            const response = await apiFetch('/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

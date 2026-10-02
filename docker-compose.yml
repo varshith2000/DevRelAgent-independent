@@ -83,8 +83,17 @@ services:
       OTEL_ENDPOINT: otel-collector:4317
       HOST: 0.0.0.0
       PORT: "8000"
+      # System of record + shared session store (Phase 1).
+      DATABASE_URL: postgresql+psycopg://devrel:devrel@postgres:5432/devrel
+      DATABASE_AUTO_CREATE: "true"
+      SESSION_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:

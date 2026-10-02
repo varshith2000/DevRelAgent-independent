@@ -6,6 +6,24 @@ DevRelAgent implements a defense-in-depth security approach with multiple layers
 
 ## Security Architecture
 
+### Layer 0: Authentication & Tenant Isolation (Phase 1)
+
+- **Pluggable identity**: `AUTH_PROVIDER=dev` derives the caller from headers
+  (development/tests only); `AUTH_PROVIDER=clerk` verifies a real Clerk/OIDC JWT
+  against the issuer's JWKS (signature, issuer and audience).
+- **Workspace → Project scoping**: every request resolves to a workspace and a
+  project. Queries are always filtered by the caller's workspace, so another
+  tenant's id resolves to `404`, never to data.
+- **Roles**: memberships carry `owner` / `admin` / `member` / `viewer`; the
+  workspace creator owns it. Administrative endpoints require `owner`/`admin`.
+- **Project API keys**: `drk_<prefix>_<secret>`; only a salted SHA-256 hash is
+  stored. Keys authenticate data-plane access and are denied administrative
+  actions.
+- **Session store**: conversation state is namespaced per project and held in a
+  shared store (`memory` / `redis`).
+
+**Implementation**: `auth/`, `db/`, `sessions/`
+
 ### Layer 1: Input Validation & Sanitization
 
 #### **Input Guardrails**
@@ -154,21 +172,24 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Source Restrictions**: Only accesses configured data sources
 - **Read-Only Default**: Default tools are read-only
 - **Approval for Writes**: Write operations require approval
-- **Tenant Isolation**: not implemented yet (Phase 1)
+- **Tenant Isolation**: requests are scoped to a workspace + project; cross-tenant access is denied
 
 ### Authentication & Authorization
 
 #### **Access Control**
-- **Session Management**: Unique session IDs for all interactions
-- **Audit Attribution**: Actions attributed to a session (and user, when supplied)
-- **Not yet implemented**: authentication, permission checks, RBAC (Phase 1)
+- **Authentication**: pluggable (dev headers locally, Clerk/OIDC JWTs in real deployments)
+- **Authorization**: role checks (`owner`/`admin`/`member`/`viewer`) via `require_role`
+- **Session Management**: sessions are unique and namespaced per project
+- **Audit Attribution**: actions attributed to a session and user
+- **Remaining gap**: guardrail/approval/audit state is not yet partitioned per project
 
 #### **API Security**
 - **CORS Configuration**: Controlled cross-origin access
 - **Rate Limiting**: Tool-level limits exist; no HTTP edge limit yet
 - **Input Validation**: All API inputs validated (Pydantic)
 - **Error Handling**: Validation errors are returned without internal details
-- **Not yet implemented**: API authentication and authorization (Phase 1)
+- **Authentication**: required on all data endpoints (401 without valid credentials)
+- **Remaining gap**: no HTTP edge rate limiting yet (tool-level limits exist)
 
 ### Threat Mitigation
 
@@ -212,11 +233,12 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 ### Known Gaps
 
-- **No authentication or authorization** on the API (Phase 1)
-- **No tenant isolation** (Phase 1)
+- **Guardrail/approval/audit state is process-local and not yet partitioned per project**
+- **`AUTH_PROVIDER=dev` trusts caller-supplied headers** and must never face an untrusted network
 - **No tamper-evident / hash-chained audit log**
 - **No configurable retention or right-to-erasure tooling**
 - **No encryption-at-rest story** for stored audit files
+- **No HTTP edge rate limiting**
 
 #### **Audit Features**
 - **Append-only files**: JSONL audit trail
@@ -224,11 +246,11 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 ### Governance Controls
 
-#### **Multi-Tenancy** (Optional)
-- **Tenant Isolation**: Separate data per tenant
-- **Tenant Managers**: Manage tenant configurations
-- **User-Tenant Mapping**: Associate users with tenants
-- **Resource Quotas**: Per-tenant resource limits
+#### **Multi-Tenancy**
+- **Tenant Isolation**: separate system-of-record data per workspace, enforced in the API
+- **User-Tenant Mapping**: memberships associate users with workspaces and roles
+- **Projects**: the working scope within a workspace (projects, API keys, sessions)
+- **Remaining gap**: per-tenant resource quotas
 
 #### **Policy Enforcement**
 - **Approval Policies**: Configurable approval requirements

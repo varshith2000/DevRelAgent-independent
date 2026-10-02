@@ -34,10 +34,22 @@ jobs:
         run: ruff check apps/backend tests
 
       - name: Format check (black)
-        run: black --check apps/backend/config apps/backend/observability tests/conftest.py
+        run: >
+          black --check
+          apps/backend/config apps/backend/observability
+          apps/backend/auth apps/backend/db apps/backend/sessions
+          apps/backend/alembic
+          apps/backend/routes/workspaces.py apps/backend/routes/identity.py
+          tests/conftest.py tests/test_tenancy
 
       - name: Type check (mypy)
         run: mypy
+
+      - name: Migrations apply cleanly (SQLite)
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: sqlite:////tmp/devrelagent_ci.db
+        run: alembic upgrade head
 
       - name: Tests (pytest)
         run: pytest -m "not integration"

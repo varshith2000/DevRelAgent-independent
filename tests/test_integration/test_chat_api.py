@@ -35,8 +35,8 @@ from routes.chat import router as chat_router
 
 
 @pytest.fixture
-def test_app() -> FastAPI:
-    """Create test FastAPI application."""
+def test_app(db_engine) -> FastAPI:
+    """Create test FastAPI application bound to a throwaway database."""
     app = FastAPI()
     app.include_router(chat_router)
     return app

@@ -20,14 +20,17 @@ from typing import Any, Dict, List, Optional
 
 from audit.logger import get_audit_logger
 from audit.schemas import AuditEntry, AuditExport, AuditFilter, AuditSummary
-from fastapi import APIRouter, HTTPException, Query, Response
+from auth.deps import get_request_context
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 # Router
-router = APIRouter(prefix="/audit", tags=["audit"])
+router = APIRouter(
+    prefix="/audit", tags=["audit"], dependencies=[Depends(get_request_context)]
+)
 
 
 @router.get("/recent", response_model=List[AuditEntry])

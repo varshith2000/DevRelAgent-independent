@@ -4,18 +4,19 @@ KeDB Tool — Known Error Database
 Vector store for resolved issues: error_signature → root_cause → solution
 """
 
-import os
 import json
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+import os
+from dataclasses import asdict, dataclass
 from datetime import datetime
-import numpy as np
-from sentence_transformers import SentenceTransformer
-import faiss
+from typing import Any, Dict, List, Optional
 
-from tools.registry import tool, ToolCategory
+import faiss
+import numpy as np
 from memory.kedb_store import KeDBStore
+from sentence_transformers import SentenceTransformer
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 

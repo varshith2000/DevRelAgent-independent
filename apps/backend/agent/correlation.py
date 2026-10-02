@@ -6,8 +6,8 @@ Used by multi-step reasoning to provide comprehensive analysis.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class CorrelationEngine:
         self,
         metrics: Optional[Dict[str, Any]] = None,
         logs: Optional[List[Dict[str, Any]]] = None,
-        traces: Optional[List[Dict[str, Any]] = None
+        traces: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Find correlations across different data sources.

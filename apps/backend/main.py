@@ -5,29 +5,35 @@ Health endpoint, CORS, lifespan hooks, and route integration.
 """
 
 import asyncio
+import logging
 import os
 import sys
-import logging
-import uvicorn
 from contextlib import asynccontextmanager
+
+import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
 load_dotenv()
 
 # Add backend to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from routes.chat import router as chat_router, start_cleanup_task
-from routes.dashboard import router as dashboard_router
+from config.settings import get_settings
+from guardrails.approval_guard import get_approval_guard
+from observability.logging import configure_logging
 from routes.approvals import router as approvals_router
 from routes.audit import router as audit_router
-from tools.registry import get_registry, ToolCategory
-from tools.clickhouse_tool import get_clickhouse_tool
-from guardrails.approval_guard import get_approval_guard
+from routes.chat import router as chat_router
+from routes.chat import start_cleanup_task
+from routes.dashboard import router as dashboard_router
 from scheduler import HealthCheckScheduler
-import os
+from tools.clickhouse_tool import get_clickhouse_tool
+from tools.registry import ToolCategory, get_registry
+
+settings = get_settings()
+configure_logging(settings.log_level)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks."""
     logger.info("🚀 DevRelAgent API starting...")
+
+    # Fail fast with a clear list of any missing required configuration.
+    settings.validate_startup()
 
     # Initialize tool registry
     registry = get_registry()
@@ -166,7 +175,7 @@ async def lifespan(app: FastAPI):
     # Initialize Health Check Scheduler
     health_scheduler = None
     try:
-        health_check_enabled = os.getenv("HEALTH_CHECK_ENABLED", "false").lower() == "true"
+        health_check_enabled = settings.health_check_enabled
 
         if health_check_enabled:
             from database.clickhouse_client import get_clickhouse_client
@@ -175,8 +184,8 @@ async def lifespan(app: FastAPI):
             health_scheduler = HealthCheckScheduler(
                 clickhouse_client=ch_client,
                 tool_registry=registry,
-                interval_minutes=int(os.getenv("HEALTH_CHECK_INTERVAL_MINUTES", "5")),
-                error_threshold=float(os.getenv("ERROR_SPIKE_THRESHOLD", "5.0"))
+                interval_minutes=settings.health_check_interval_minutes,
+                error_threshold=settings.error_spike_threshold
             )
 
             # Connect SSE queue for alerts
@@ -280,8 +289,8 @@ async def root():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=os.getenv("HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", 8000)),
+        host=settings.host,
+        port=settings.port,
         reload=True,
         log_level="info",
     )

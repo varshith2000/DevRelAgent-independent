@@ -2,9 +2,10 @@
 Quick test script to verify dashboard connectivity and generate test alerts.
 """
 
-import requests
 import json
 import time
+
+import requests
 
 BASE_URL = "http://localhost:8000"
 
@@ -86,7 +87,7 @@ def create_multiple_test_alerts():
             if response.status_code == 200:
                 print(f"[+] Created alert for {alert['service']}")
             else:
-                print(f"[!] Routes not loaded yet")
+                print("[!] Routes not loaded yet")
                 break
         except Exception as e:
             print(f"[!] Dashboard routes not available: {e}")

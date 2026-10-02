@@ -10,12 +10,12 @@ Processes: Ensemble → Merge → Deduplicate → Semantic Chunking
 """
 
 import re
+import statistics
 import sys
 import uuid
-import statistics
-from pathlib import Path
-from typing import List, Dict, Optional
 from collections import Counter
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import fitz  # PyMuPDF
 import pdfplumber
@@ -30,8 +30,9 @@ except ImportError:
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
+
+from tools.doc_search.base import DocumentIndexer
 
 
 class PdfIndexer(DocumentIndexer):

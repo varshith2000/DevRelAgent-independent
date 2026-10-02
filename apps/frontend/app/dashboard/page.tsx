@@ -5,6 +5,7 @@ import { Activity, Bot } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DashboardFeed } from '../../components/DashboardFeed';
 import { SystemStatus } from '../../components/SystemStatus';
+import { apiUrl } from '../../lib/api';
 
 interface ServiceStatus {
   [key: string]: 'green' | 'yellow' | 'red';
@@ -19,7 +20,7 @@ export default function DashboardPage() {
     // Fetch initial system status
     const fetchStatus = async () => {
       try {
-        const response = await fetch('http://localhost:8000/dashboard/status');
+        const response = await fetch(apiUrl('/dashboard/status'));
         const data = await response.json();
         if (data.services) {
           setServiceStatus(data.services);

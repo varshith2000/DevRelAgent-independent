@@ -13,17 +13,19 @@ Usage:
     chunks = indexer.ingest("data/docs/diagram.png")
 """
 
-import sys
-import re
 import base64
 import hashlib
-from pathlib import Path
-from typing import List, Dict, Optional
+import json
+import re
+import sys
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
 
 try:
-    from PIL import Image
     import io
+
+    from PIL import Image
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -32,11 +34,10 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
-from tools.code_search.config import (
-    OLLAMA_EMBED_URL, OLLAMA_URL, EMBED_MODEL, VISION_MODEL
-)
+
+from tools.code_search.config import EMBED_MODEL, OLLAMA_EMBED_URL, OLLAMA_URL, VISION_MODEL
+from tools.doc_search.base import DocumentIndexer
 
 
 class ImageIndexer(DocumentIndexer):
@@ -180,7 +181,7 @@ class ImageIndexer(DocumentIndexer):
                 data_dir = Path(__file__).parent.parent.parent.parent / "data"
                 full_path = data_dir / img_path_or_url
                 if not full_path.exists():
-                    full_path = Path(img_path_or_path).resolve()
+                    full_path = Path(img_path_or_url).resolve()
 
             if full_path.exists():
                 return full_path.read_bytes()

@@ -19,8 +19,8 @@ Usage:
     entries = await logger.query_session(session_id="abc123")
 """
 
-from .schemas import AuditEntry, AuditFilter, AuditExport, AuditSummary
 from .logger import AuditLogger, get_audit_logger
+from .schemas import AuditEntry, AuditExport, AuditFilter, AuditSummary
 
 __all__ = [
     "AuditEntry",

@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Minimize2, Maximize2, Bot, User } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { SqlSandbox } from './SqlSandbox';
+import { apiUrl } from '../lib/api';
 
 interface Message {
     id: string;
@@ -57,7 +58,7 @@ export function ChatWidget({ className = '' }: ChatWidgetProps) {
         setIsTyping(true);
 
         try {
-            const response = await fetch('http://localhost:8000/chat', {
+            const response = await fetch(apiUrl('/chat'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

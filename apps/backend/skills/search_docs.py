@@ -4,10 +4,12 @@ SearchDocsSkill — Multi-source documentation search
 Searches across multiple documentation sources and provides comprehensive answers.
 """
 
-from typing import Dict, Any, Optional, List
 import logging
-from .base import Skill, SkillResult
+from typing import Any, Dict, List, Optional
+
 from tools.registry import get_registry
+
+from .base import Skill, SkillResult
 
 logger = logging.getLogger(__name__)
 

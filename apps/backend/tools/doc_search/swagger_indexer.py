@@ -4,9 +4,9 @@ Swagger Indexer — OpenAPI/Swagger specification processing
 Parses OpenAPI 2.0 and 3.x specs and indexes API endpoints as searchable chunks.
 """
 
+import json
 import sys
 import uuid
-import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,8 +18,9 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
+
+from tools.doc_search.base import DocumentIndexer
 
 
 class SwaggerIndexer(DocumentIndexer):

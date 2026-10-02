@@ -12,11 +12,9 @@ Features:
 
 import sys
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
-from tools.code_search.config import (
-    SUPPORTED_EXTENSIONS, PARSER_MODULES, CHUNK_SIZE, CHUNK_OVERLAP
-)
+from tools.code_search.config import CHUNK_OVERLAP, CHUNK_SIZE, PARSER_MODULES, SUPPORTED_EXTENSIONS
 
 # Import CodeChunk from models — handle both direct and package execution
 try:

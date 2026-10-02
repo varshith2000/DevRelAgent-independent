@@ -70,7 +70,7 @@ async def test_tool_registry():
     print("TEST 2: Tool Registry")
     print("="*60)
 
-    from tools.registry import get_registry, ToolCategory, tool
+    from tools.registry import ToolCategory, get_registry, tool
 
     registry = get_registry()
 
@@ -223,7 +223,7 @@ async def test_agent_streaming():
         elif chunk["type"] == "tool_call":
             print(f"\n\n  🔧 Tool: {chunk['data'].get('tool_name')}")
         elif chunk["type"] == "done":
-            print(f"\n\n  ✅ Done")
+            print("\n\n  ✅ Done")
 
     print("\n\n✅ Agent Streaming test passed!")
 

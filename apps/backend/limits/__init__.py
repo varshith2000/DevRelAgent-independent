@@ -23,8 +23,8 @@ Usage:
 
 from .rate_limiter import (
     RateLimiter,
-    RateLimitRule,
     RateLimitResult,
+    RateLimitRule,
     TokenCounter,
     get_rate_limiter,
     rate_limit,

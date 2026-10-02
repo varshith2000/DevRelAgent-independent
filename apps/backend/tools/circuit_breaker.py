@@ -15,11 +15,11 @@ Features:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Optional, Any, List, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +132,12 @@ class CircuitBreaker:
         self._failure_count += 1
         self._last_failure_time = time.time()
         self.stats.failed_calls += 1
-        stats.last_failure_time = datetime.now()
-        stats.failure_rate = stats.failed_calls / stats.total_calls if stats.total_calls > 0 else 0
+        self.stats.last_failure_time = datetime.now()
+        self.stats.failure_rate = (
+            self.stats.failed_calls / self.stats.total_calls
+            if self.stats.total_calls > 0
+            else 0
+        )
 
         logger.warning(
             f"CircuitBreaker: Failure recorded for {self.tool_name} "
@@ -154,15 +158,21 @@ class CircuitBreaker:
         self._success_count += 1
         self._last_success_time = time.time()
         self.stats.successful_calls += 1
-        stats.last_success_time = datetime.now()
-        stats.failure_rate = stats.failed_calls / stats.total_calls if stats.total_calls > 0 else 0
+        self.stats.last_success_time = datetime.now()
+        self.stats.failure_rate = (
+            self.stats.failed_calls / self.stats.total_calls
+            if self.stats.total_calls > 0
+            else 0
+        )
 
         # Track response time
         if execution_time_ms is not None:
             self._response_times.append(execution_time_ms)
             if len(self._response_times) > self._max_response_times:
                 self._response_times = self._response_times[-self._max_response_times:]
-            stats.average_response_time_ms = sum(self._response_times) / len(self._response_times)
+            self.stats.average_response_time_ms = sum(self._response_times) / len(
+                self._response_times
+            )
 
         # In half-open state, successes lead back to closed
         if self._state == CircuitState.HALF_OPEN:

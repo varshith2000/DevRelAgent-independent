@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database import get_clickhouse_client, config
+from database import config, get_clickhouse_client
 from tools.clickhouse_schema import get_schema_explorer
 
 print("=" * 60)
@@ -22,7 +22,7 @@ try:
     client = get_clickhouse_client()
 
     # Get current database
-    print(f"✅ Connected successfully!")
+    print("✅ Connected successfully!")
     print(f"   Database: {config.database}")
     print(f"   Host: {config.host}")
     print(f"   Port: {config.port}")

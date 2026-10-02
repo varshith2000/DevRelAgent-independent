@@ -9,13 +9,12 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Any, Optional, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-
-from scheduler import get_health_scheduler
 from guardrails.approval_guard import get_approval_guard
+from scheduler import get_health_scheduler
 
 logger = logging.getLogger(__name__)
 

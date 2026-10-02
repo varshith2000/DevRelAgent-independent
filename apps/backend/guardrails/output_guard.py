@@ -25,17 +25,18 @@ Usage:
         process(result.validated_text)
 """
 
-import re
-import logging
-import hashlib
 import asyncio
-from typing import List, Dict, Any, Optional, Tuple, Set, Callable
+import hashlib
+import logging
+import re
 from dataclasses import dataclass
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
 import sqlparse
 from sqlparse.sql import Statement, TokenList
-from sqlparse.tokens import Keyword, DML, DDL
+from sqlparse.tokens import DDL, DML, Keyword
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ class SQLSafetyValidator:
             if token.ttype in (Keyword, DML, DDL):
                 self._violations.append({
                     "type": "blocked_keyword",
-                    "reason": f"Dangerous SQL operation detected",
+                    "reason": "Dangerous SQL operation detected",
                     "keyword": token_value,
                     "severity": "high" if token_value in ["DROP", "DELETE", "TRUNCATE"] else "medium",
                 })

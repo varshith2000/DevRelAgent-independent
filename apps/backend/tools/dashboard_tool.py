@@ -8,16 +8,18 @@ All write operations require mandatory HITL approval.
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
 
-from tools.registry import tool, ToolCategory
+from config.settings import get_settings
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 
-# Dashboard storage path
-DASHBOARD_STORAGE_PATH = os.getenv("DASHBOARD_STORAGE_PATH", "data/dashboards")
+# Dashboard storage path (single source of truth: config.settings)
+DASHBOARD_STORAGE_PATH = get_settings().dashboard_storage_path
 
 
 # ============== Helper Functions ==============

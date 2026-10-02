@@ -1,28 +1,79 @@
-"""Pytest configuration and shared fixtures for DevRelAgent tests."""
+"""Pytest configuration and shared fixtures for DevRelAgent tests.
+
+The suite is fully hermetic: the LLM provider is replaced with a deterministic
+in-process stub so tests never make network calls, never require API keys and
+never depend on external quotas.
+"""
 
 import os
 import sys
-import asyncio
+
 import pytest
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'backend'))
+# Make the backend importable (``import config.settings``, ``import agent.loop``).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "backend"))
 
 
-# ============== Async Fixtures ==============
+# ============== Hermetic network ==============
 
-@pytest.fixture
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
+
+
+@pytest.fixture(autouse=True)
+def _block_external_network(monkeypatch):
+    """Prevent tests from reaching any non-loopback host.
+
+    Without this, agent construction attempts a real ClickHouse connection and
+    interactive HTTP calls reach third-party APIs, making the suite slow, flaky
+    and dependent on credentials.
+    """
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) else address
+        if isinstance(host, str) and host not in _LOCAL_HOSTS:
+            raise RuntimeError(f"Network access to '{host}' is blocked in tests")
+        return real_connect(self, address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    yield
+
+
+# ============== Hermetic LLM ==============
+
+
+class _StubLLM:
+    """Deterministic stand-in for any real LLM provider."""
+
+    def __init__(self, model: str = "stub-model"):
+        self.model = model
+
+    def generate(self, prompt: str, max_tokens: int = 1000, system=None) -> str:
+        return "Deterministic stub response for tests."
+
+
+@pytest.fixture(autouse=True)
+def _no_network_llm(monkeypatch):
+    """Replace the LLM provider factory so no test hits a real API.
+
+    ``llm_generate`` resolves ``get_llm`` from its module globals at call time,
+    so patching the factory is enough to cover every caller (router, loop,
+    planner, tools) without knowing which modules imported ``llm_generate``.
+    """
+    try:
+        from agent import llm_provider
+    except Exception:  # pragma: no cover - backend not importable in some contexts
+        yield
+        return
+
+    monkeypatch.setattr(llm_provider, "get_llm", lambda *a, **k: _StubLLM())
+    yield
 
 
 # ============== Mock Fixtures ==============
+
 
 @pytest.fixture
 def mock_llm_response():
@@ -56,6 +107,7 @@ def mock_session_context():
 @pytest.fixture
 def mock_perception_result():
     """Mock perception result."""
+
     class MockPerception:
         def __init__(self):
             self.user_input = "Test query"
@@ -63,11 +115,12 @@ def mock_perception_result():
             self.entities = ["test data"]
             self.tool_hint = "clickhouse_query"
             self.repo_url = None
-    
+
     return MockPerception()
 
 
 # ============== Test Data Fixtures ==============
+
 
 @pytest.fixture
 def sample_sql_queries():
@@ -113,6 +166,7 @@ def sample_injection_attempts():
 
 # ============== Guardrail Fixtures ==============
 
+
 @pytest.fixture
 def input_guardrail_config():
     """Input guardrail configuration for testing."""
@@ -149,6 +203,7 @@ def tool_guardrail_config():
 
 # ============== Utility Fixtures ==============
 
+
 @pytest.fixture
 def temp_file(tmp_path):
     """Create a temporary file."""
@@ -165,22 +220,30 @@ def temp_dir(tmp_path):
     return dir_path
 
 
-# ============== pytest-asyncio Configuration ==============
-
-pytest_plugins = ('pytest_asyncio',)
-
-
 def pytest_configure(config):
-    """Configure pytest."""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    """Register custom markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow")
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "guardrail: marks tests related to guardrails")
+    config.addinivalue_line("markers", "tool: marks tests related to tool execution")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip ``integration``-marked specs unless explicitly requested.
+
+    Those specs encode the Phase 1+ API surface (approvals request/respond
+    endpoints, structured investigation output) and require live datasources.
+    They stay runnable via ``pytest -m integration``.
+    """
+    marker_expr = getattr(config.option, "markexpr", "") or ""
+    if "integration" in marker_expr:
+        return
+
+    skip_integration = pytest.mark.skip(
+        reason=(
+            "integration spec targets the Phase 1+ API surface; " "run with `pytest -m integration`"
+        )
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "guardrail: marks tests related to guardrails"
-    )
-    config.addinivalue_line(
-        "markers", "tool: marks tests related to tool execution"
-    )
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)

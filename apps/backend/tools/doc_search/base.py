@@ -10,11 +10,10 @@ Team implements concrete indexers for each format:
 - SwaggerIndexer
 """
 
-from abc import ABC, abstractmethod
-from typing import List
-
 import sys
+from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import List
 
 try:
     from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus

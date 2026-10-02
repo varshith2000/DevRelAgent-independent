@@ -32,11 +32,11 @@ Usage:
 import asyncio
 import json
 import logging
+import sys
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional
 from pathlib import Path
-import sys
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -44,6 +44,9 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from agent.loop import AgentLoop
+from audit.logger import get_audit_logger
+from audit.schemas import ActionType, AuditEntry, DataAccessed
 from models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -51,10 +54,7 @@ from models.schemas import (
     SessionContext,
     ToolCallResult,
 )
-from agent.loop import AgentLoop
 from tools.registry import get_registry
-from audit.logger import get_audit_logger
-from audit.schemas import AuditEntry, ActionType, DataAccessed
 
 logger = logging.getLogger(__name__)
 

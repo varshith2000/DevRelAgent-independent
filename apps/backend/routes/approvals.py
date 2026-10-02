@@ -6,12 +6,12 @@ Frontend uses these endpoints to respond to approval requests.
 """
 
 import logging
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from typing import List, Optional
 
-from models.approval import ApprovalRequest, ApprovalResponse, ApprovalStatus
+from fastapi import APIRouter, HTTPException, Query
 from guardrails.approval_guard import get_approval_guard
+from models.approval import ApprovalRequest, ApprovalResponse, ApprovalStatus
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 

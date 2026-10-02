@@ -4,14 +4,15 @@ Known Error Database (KeDB) Store — Long-term error knowledge
 Vector store for resolved issues with FAISS indexing.
 """
 
-import os
 import json
 import logging
-from typing import Dict, List, Any, Optional
-import numpy as np
-import faiss
+import os
+from collections import Counter, defaultdict
 from datetime import datetime
-from collections import defaultdict, Counter
+from typing import Any, Dict, List, Optional
+
+import faiss
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

@@ -9,29 +9,30 @@ Implements enterprise-grade governance features:
 - Approval history
 """
 
+import hashlib
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional, Literal
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, field
-import hashlib
+from typing import Any, Dict, List, Literal, Optional
+
+from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Storage paths
-AUDIT_LOG_PATH = os.getenv("AUDIT_LOG_PATH", "data/audit")
-TENANT_CONFIG_PATH = os.getenv("TENANT_CONFIG_PATH", "data/tenants")
+# Storage paths (single source of truth: config.settings)
+_settings = get_settings()
+AUDIT_LOG_PATH = _settings.audit_log_path
+TENANT_CONFIG_PATH = _settings.tenant_config_path
 
 
 @dataclass
 class AuditEvent:
     """Single audit event."""
-    event_id: str = field(default_factory=lambda: f"evt_{datetime.now().strftime('%Y%m%d%H%M%S%f')}")
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    # Event details
+    # Event details (required: must precede defaulted fields)
     event_type: Literal[
         "query_received",
         "tool_executed",
@@ -43,6 +44,9 @@ class AuditEvent:
         "config_changed",
         "error_occurred"
     ]
+
+    event_id: str = field(default_factory=lambda: f"evt_{datetime.now().strftime('%Y%m%d%H%M%S%f')}")
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     # User information
     user_id: Optional[str] = None

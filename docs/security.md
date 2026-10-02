@@ -107,9 +107,10 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 #### **Audit Logging**
 - **Complete Logging**: All actions logged with full context
-- **Tamper-Evident**: Logs use cryptographic hashing for integrity
+- **Append-only files**: JSONL audit logs written per day
 - **Data Access Tracking**: Monitors all data source access
-- **Export Capabilities**: Supports compliance reporting
+- **Export Capabilities**: JSON and CSV export
+- **Not yet implemented**: content hashing / tamper evidence
 
 **Implementation**: `audit/logger.py`
 
@@ -153,21 +154,21 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Source Restrictions**: Only accesses configured data sources
 - **Read-Only Default**: Default tools are read-only
 - **Approval for Writes**: Write operations require approval
-- **Tenant Isolation**: Multi-tenant data separation (if enabled)
+- **Tenant Isolation**: not implemented yet (Phase 1)
 
 ### Authentication & Authorization
 
 #### **Access Control**
 - **Session Management**: Unique session IDs for all interactions
-- **User Tracking**: Optional user identification for accountability
-- **Permission Checks**: Validates user permissions before actions
-- **Audit Attribution**: All actions attributed to specific users/sessions
+- **Audit Attribution**: Actions attributed to a session (and user, when supplied)
+- **Not yet implemented**: authentication, permission checks, RBAC (Phase 1)
 
 #### **API Security**
 - **CORS Configuration**: Controlled cross-origin access
-- **Rate Limiting**: Prevents API abuse
-- **Input Validation**: All API inputs validated
-- **Error Handling**: Secure error messages (no sensitive data leaked)
+- **Rate Limiting**: Tool-level limits exist; no HTTP edge limit yet
+- **Input Validation**: All API inputs validated (Pydantic)
+- **Error Handling**: Validation errors are returned without internal details
+- **Not yet implemented**: API authentication and authorization (Phase 1)
 
 ### Threat Mitigation
 
@@ -197,19 +198,29 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 ## Compliance & Governance
 
-### Audit Compliance
+> **No certification is claimed.** DevRelAgent is not SOC 2, HIPAA, GDPR or
+> PCI DSS certified, and nothing in this document should be read as a
+> compliance guarantee. It describes controls that *help* with compliance work
+> and the gaps that remain.
 
-#### **Regulatory Support**
-- **SOC 2**: Complete audit trail with tamper evidence
-- **HIPAA**: PII detection and redaction
-- **GDPR**: Data access logging and right to be forgotten
-- **PCI DSS**: Payment data handling controls
+### Controls That Support Compliance
+
+- **PII detection and redaction** on user input
+- **Audit logging** of queries, tool calls and approval decisions
+- **Approval gates** for risky, write-like actions
+- **Data-access logging** for configured datasources
+
+### Known Gaps
+
+- **No authentication or authorization** on the API (Phase 1)
+- **No tenant isolation** (Phase 1)
+- **No tamper-evident / hash-chained audit log**
+- **No configurable retention or right-to-erasure tooling**
+- **No encryption-at-rest story** for stored audit files
 
 #### **Audit Features**
-- **Immutable Logs**: Append-only audit trail
-- **Integrity Checking**: Cryptographic hashes for verification
+- **Append-only files**: JSONL audit trail
 - **Export & Reporting**: JSON/CSV export capabilities
-- **Retention Policies**: Configurable log retention
 
 ### Governance Controls
 

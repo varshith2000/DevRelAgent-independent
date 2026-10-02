@@ -13,14 +13,14 @@ Main classes:
 """
 
 from .base import DocumentIndexer
-from .pdf_indexer import PdfIndexer
-from .word_indexer import WordIndexer
-from .text_indexer import TextIndexer
-from .swagger_indexer import SwaggerIndexer
 from .image_indexer import ImageIndexer
-from .web_indexer import WebIndexer
-from .vector_store import DocumentVectorStore
+from .pdf_indexer import PdfIndexer
 from .rag_tool import RagTool, create_rag_tool
+from .swagger_indexer import SwaggerIndexer
+from .text_indexer import TextIndexer
+from .vector_store import DocumentVectorStore
+from .web_indexer import WebIndexer
+from .word_indexer import WordIndexer
 
 __all__ = [
     "DocumentIndexer",

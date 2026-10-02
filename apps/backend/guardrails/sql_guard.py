@@ -20,11 +20,12 @@ Usage:
 
 import logging
 import re
-from typing import List, Tuple, Optional, Set
 from enum import Enum
+from typing import List, Optional, Set, Tuple
+
 import sqlparse
-from sqlparse.sql import Statement, TokenList, Token
-from sqlparse.tokens import Keyword, DML, DDL, Name
+from sqlparse.sql import Statement, Token, TokenList
+from sqlparse.tokens import DDL, DML, Keyword, Name
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +279,7 @@ class SQLGuard:
                         SQLViolationType.DESTRUCTIVE_OPERATION
                         if token_value in ("DROP", "TRUNCATE", "ALTER")
                         else SQLViolationType.DATA_MODIFICATION,
-                        f"Dangerous SQL operation detected",
+                        "Dangerous SQL operation detected",
                         keyword=token_value,
                     )
 

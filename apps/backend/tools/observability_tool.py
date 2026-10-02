@@ -6,11 +6,11 @@ Replaces raw SQL with well-defined operations with enforced limits and scoping.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Literal, Union
-from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from tools.registry import tool, ToolCategory
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ async def get_error_rate(
         if not time_range.validate(max_minutes=1440):
             return {
                 "success": False,
-                "error": f"Time range exceeds maximum of 1440 minutes (24 hours)"
+                "error": "Time range exceeds maximum of 1440 minutes (24 hours)"
             }
 
         client = get_clickhouse_client()

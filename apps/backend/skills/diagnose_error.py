@@ -4,10 +4,12 @@ DiagnoseErrorSkill — Multi-step error diagnosis
 Chains: KeDB check → ClickHouse logs → Code search → Summary
 """
 
-from typing import Dict, Any, Optional
 import logging
-from .base import Skill, SkillResult
+from typing import Any, Dict, Optional
+
 from tools.registry import get_registry
+
+from .base import Skill, SkillResult
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +132,7 @@ class DiagnoseErrorSkill(Skill):
                 return None
             
             # Build natural language query for logs
-            query_parts = [f"Show recent errors"]
+            query_parts = ["Show recent errors"]
             if service_name:
                 query_parts.append(f"from service {service_name}")
             if "authentication" in error_description.lower() or "auth" in error_description.lower():

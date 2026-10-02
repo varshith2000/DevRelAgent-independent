@@ -25,42 +25,49 @@ Usage:
 
 import asyncio
 import logging
-import sys
-from typing import Optional, List, Dict, Any, AsyncGenerator
-from datetime import datetime
 import re
+import sys
+from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from agent.llm_provider import llm_generate
-from agent.router import classify_intent
-from models.schemas import (
-    PerceptionResult,
-    SessionContext,
-    ToolCallResult,
-    StructuredAgentResponse,
-    AgentObservation,
-    EvidenceItem,
+from guardrails.input_guard import (
+    GuardrailResult as InputGuardrailResult,
 )
-from tools.registry import get_registry, ToolRegistry, ToolCategory
 
 # Import guardrails
 from guardrails.input_guard import (
-    get_input_guardrail,
     InputGuardrail,
-    GuardrailResult as InputGuardrailResult,
     TopicCategory,
+    get_input_guardrail,
 )
 from guardrails.output_guard import (
-    get_output_guardrail,
+    GroundingStatus,
     OutputGuardrail,
     OutputValidationResult,
-    GroundingStatus,
+    get_output_guardrail,
 )
 from guardrails.tool_guard import (
-    get_tool_guardrail,
-    ToolGuardrail,
-    ToolExecutionResult as GuardedToolResult,
     ToolCategory as GuardToolCategory,
 )
+from guardrails.tool_guard import (
+    ToolExecutionResult as GuardedToolResult,
+)
+from guardrails.tool_guard import (
+    ToolGuardrail,
+    get_tool_guardrail,
+)
+from models.schemas import (
+    AgentObservation,
+    EvidenceItem,
+    PerceptionResult,
+    SessionContext,
+    StructuredAgentResponse,
+    ToolCallResult,
+)
+from tools.registry import ToolCategory, ToolRegistry, get_registry
+
+from agent.llm_provider import llm_generate
+from agent.router import classify_intent
 
 logger = logging.getLogger(__name__)
 

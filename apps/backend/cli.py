@@ -25,15 +25,16 @@ Usage:
     python cli.py list-investigations
 """
 
+import argparse
 import asyncio
 import json
 import logging
-import sys
-import argparse
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -44,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from agent.loop import AgentLoop
 from memory.investigation_store import get_investigation_store
-from models.schemas import StructuredAgentResponse, InvestigationState
+from models.schemas import InvestigationState, StructuredAgentResponse
 from tools.registry import get_registry
 
 # Configure logging
@@ -152,7 +153,7 @@ class DevRelAgentCLI:
             logger.info(f"Investigating: {query}")
 
             if self.verbose:
-                logger.info(f"[VERBOSE] Processing query with agent loop...")
+                logger.info("[VERBOSE] Processing query with agent loop...")
                 logger.info(f"[VERBOSE] Query length: {len(query)} characters")
 
             # Create SessionContext from session_id
@@ -183,15 +184,15 @@ class DevRelAgentCLI:
                 print(f"\n{'='*60}")
                 print("HUMAN APPROVAL REQUIRED")
                 print(f"{'='*60}")
-                print(f"\nThe following action requires your approval:")
+                print("\nThe following action requires your approval:")
                 print(f"\nQuery: {query}")
 
                 if tool_calls:
-                    print(f"\nTools to be executed:")
+                    print("\nTools to be executed:")
                     for tc in tool_calls:
                         print(f"  - {tc.tool_name}")
 
-                print(f"\nResponse preview:")
+                print("\nResponse preview:")
                 preview = response_text.split('[Note:')[0].strip()
                 if len(preview) > 200:
                     preview = preview[:200] + "..."
@@ -245,7 +246,7 @@ class DevRelAgentCLI:
                 response_text = response_text.split('[Note:')[0].strip()
 
             if self.verbose:
-                logger.info(f"[VERBOSE] Agent processing complete")
+                logger.info("[VERBOSE] Agent processing complete")
                 logger.info(f"[VERBOSE] Response length: {len(response_text)} characters")
                 if tool_calls:
                     logger.info(f"[VERBOSE] Number of tool calls: {len(tool_calls)}")
@@ -548,7 +549,7 @@ async def cmd_grafana_test_connection(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n[OK] Successfully connected to Grafana")
+            print("\n[OK] Successfully connected to Grafana")
             print(f"   URL: {result.get('grafana_url')}")
             print(f"   Version: {result.get('grafana_version')}")
             datasources = result.get("datasources", [])
@@ -616,7 +617,7 @@ async def cmd_grafana_create_dashboard(args):
         print(json.dumps(result, indent=2, default=str))
     else:
         if result.get("success"):
-            print(f"\n[OK] Dashboard created successfully!")
+            print("\n[OK] Dashboard created successfully!")
             print(f"   Service: {result.get('service_name')}")
             print(f"   Dashboard ID: {result.get('dashboard_id')}")
             print(f"   Dashboard URL: {result.get('dashboard_url')}")

@@ -23,13 +23,13 @@ Usage:
     safe_input = result.sanitized_text
 """
 
-import re
-import logging
 import hashlib
-from typing import List, Dict, Any, Optional, Tuple, Set
+import logging
+import re
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -787,7 +787,7 @@ if __name__ == "__main__":
                     print(f"  - {pii['type']}: {pii['replacement']}")
 
             if result.injection_detected:
-                print(f"Injection Detected: YES")
+                print("Injection Detected: YES")
                 for v in result.violations:
                     if v["type"] == "prompt_injection":
                         for match in v.get("matches", []):

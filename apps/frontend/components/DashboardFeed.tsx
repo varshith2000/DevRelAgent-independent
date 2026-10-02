@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { AlertCard } from './AlertCard';
+import { apiUrl } from '../lib/api';
 
 interface DashboardEvent {
   id: string;
@@ -31,7 +32,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
     const connect = () => {
       try {
-        eventSource = new EventSource('http://localhost:8000/dashboard/stream');
+        eventSource = new EventSource(apiUrl('/dashboard/stream'));
 
         eventSource.onopen = () => {
           setIsConnected(true);
@@ -82,7 +83,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
     connect();
 
     // Initial fetch of recent alerts
-    fetch('http://localhost:8000/dashboard/alerts?limit=20')
+    fetch(apiUrl('/dashboard/alerts?limit=20'))
       .then(res => res.json())
       .then(data => {
         if (data.alerts) {
@@ -103,7 +104,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
   const handleRefresh = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/dashboard/alerts?limit=20');
+      const response = await fetch(apiUrl('/dashboard/alerts?limit=20'));
       const data = await response.json();
       if (data.alerts) {
         setEvents(data.alerts);

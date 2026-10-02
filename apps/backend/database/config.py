@@ -1,26 +1,25 @@
+"""ClickHouse configuration.
+
+Values are sourced from the central :mod:`config.settings` model. Validation is
+performed lazily (via :meth:`ClickHouseConfig.validate`) rather than at import
+time so that importing modules does not require a live datasource.
 """
-ClickHouse Configuration Module
 
-Load settings from environment variables for ClickHouse Cloud connection.
-"""
+from dataclasses import dataclass, field
+from typing import Optional
 
-import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
-
-load_dotenv()
+from config.settings import get_settings
 
 
 @dataclass
 class ClickHouseConfig:
-    """ClickHouse Cloud connection configuration."""
+    """ClickHouse connection configuration."""
 
-    # Get these from ClickHouse Cloud dashboard
-    host: str = os.getenv("CLICKHOUSE_HOST", "")
-    port: int = int(os.getenv("CLICKHOUSE_PORT", "8443"))
-    username: str = os.getenv("CLICKHOUSE_USERNAME", "default")
-    password: str = os.getenv("CLICKHOUSE_PASSWORD", "")
-    database: str = os.getenv("CLICKHOUSE_DATABASE", "default")
+    host: str = field(default_factory=lambda: get_settings().clickhouse_host)
+    port: int = field(default_factory=lambda: get_settings().clickhouse_port)
+    username: str = field(default_factory=lambda: get_settings().clickhouse_username)
+    password: str = field(default_factory=lambda: get_settings().clickhouse_password)
+    database: str = field(default_factory=lambda: get_settings().clickhouse_database)
 
     # Connection settings
     secure: bool = True  # Use HTTPS for ClickHouse Cloud
@@ -28,17 +27,18 @@ class ClickHouseConfig:
     connect_timeout: int = 10
     send_receive_timeout: int = 300
 
-    def __post_init__(self):
-        """Validate required fields."""
+    def validate(self) -> None:
+        """Validate required fields, raising a clear error when unset."""
+        missing = []
         if not self.host:
-            raise ValueError(
-                "CLICKHOUSE_HOST is required! "
-                "Set it in your .env file or environment variables."
-            )
+            missing.append("CLICKHOUSE_HOST")
         if not self.password:
+            missing.append("CLICKHOUSE_PASSWORD")
+        if missing:
             raise ValueError(
-                "CLICKHOUSE_PASSWORD is required! "
-                "Set it in your .env file or environment variables."
+                "ClickHouse is not configured. Missing: "
+                + ", ".join(missing)
+                + ". Set them in your .env file or environment variables."
             )
 
     @property
@@ -61,5 +61,23 @@ class ClickHouseConfig:
         }
 
 
-# Global config instance
-config = ClickHouseConfig()
+_config: Optional[ClickHouseConfig] = None
+
+
+def get_clickhouse_config() -> ClickHouseConfig:
+    """Return the process-wide ClickHouse config, built lazily."""
+    global _config
+    if _config is None:
+        _config = ClickHouseConfig()
+    return _config
+
+
+# Backwards-compatible attribute: historically ``from .config import config``.
+class _LazyConfig:
+    """Lazy proxy so ``config.host`` works without importing eager env values."""
+
+    def __getattr__(self, item: str):
+        return getattr(get_clickhouse_config(), item)
+
+
+config = _LazyConfig()

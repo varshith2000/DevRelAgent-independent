@@ -11,13 +11,16 @@ Provides tools for:
 """
 
 import logging
-import os
-from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
-from tools.registry import tool, ToolCategory
+from config.settings import get_settings
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
+
+_settings = get_settings()
 
 
 # ============== OpenTelemetry Configuration Generation ==============
@@ -616,11 +619,12 @@ async def generate_env_vars(
         # Add database variables if requested
         if include_database:
             env_vars.update({
-                "DATABASE_HOST": os.getenv("DATABASE_HOST", "localhost"),
-                "DATABASE_PORT": os.getenv("DATABASE_PORT", "5432"),
-                "DATABASE_NAME": os.getenv("DATABASE_NAME", f"{service_name}_{environment}"),
-                "DATABASE_USER": os.getenv("DATABASE_USER", "user"),
-                "DATABASE_SSL_MODE": os.getenv("DATABASE_SSL_MODE", "require" if environment == "prod" else "disable"),
+                "DATABASE_HOST": _settings.database_host,
+                "DATABASE_PORT": _settings.database_port,
+                "DATABASE_NAME": _settings.database_name or f"{service_name}_{environment}",
+                "DATABASE_USER": _settings.database_user,
+                "DATABASE_SSL_MODE": _settings.database_ssl_mode
+                or ("require" if environment == "prod" else "disable"),
                 "DATABASE_POOL_SIZE": "10" if environment == "dev" else "50",
                 "DATABASE_TIMEOUT_SECONDS": "30",
             })
@@ -628,9 +632,9 @@ async def generate_env_vars(
         # Add cache variables if requested
         if include_cache:
             env_vars.update({
-                "CACHE_HOST": os.getenv("CACHE_HOST", "localhost"),
-                "CACHE_PORT": os.getenv("CACHE_PORT", "6379"),
-                "CACHE_DB": os.getenv("CACHE_DB", "0"),
+                "CACHE_HOST": _settings.cache_host,
+                "CACHE_PORT": _settings.cache_port,
+                "CACHE_DB": _settings.cache_db,
                 "CACHE_TTL_SECONDS": "3600",
                 "CACHE_MAX_CONNECTIONS": "10",
             })
@@ -1038,7 +1042,7 @@ async def create_structured_ticket(
 
         # Add severity info
         body_parts.extend([
-            f"## Severity",
+            "## Severity",
             "",
             f"**Severity:** {severity}",
             ""

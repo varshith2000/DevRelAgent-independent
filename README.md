@@ -198,10 +198,11 @@ python tests/test_code_search.py
 
 ## Documentation
 
-> **Project status: active development / prototype.** There is currently **no
-> authentication** on the API and **no multi-tenant isolation**. These are the
-> first deliverables of the roadmap (Phase 1). Do not expose this service to an
-> untrusted network.
+> **Project status: active development / prototype.** The API now requires an
+> identity and is scoped to a workspace and project (Phase 1), but the default
+> `AUTH_PROVIDER=dev` trusts caller-supplied headers and must **not** be exposed
+> to an untrusted network. Switch to Clerk (or another OIDC provider) for any
+> real deployment.
 
 ### Security & Governance
 
@@ -240,15 +241,45 @@ python tests/test_code_search.py
 - Actionable recommendations
 - Next steps and suggested actions
 
+### Identity & Multi-Tenancy (Phase 1)
+
+Every request resolves to a **Workspace → Project** scope, and data access is
+confined to it.
+
+- **Workspaces and projects** live in the backend's own system of record
+  (SQLite by default; point `DATABASE_URL` at Postgres/Supabase for real use).
+- **Users** join workspaces through memberships with a role
+  (`owner`, `admin`, `member`, `viewer`). The creator of a workspace owns it.
+- **Identity providers** are pluggable. `AUTH_PROVIDER=dev` derives the caller
+  from `X-Dev-User-Email` / `X-Dev-User-Name` / `X-Dev-Workspace` headers (and
+  the matching query parameters, which is how the browser `EventSource` streams
+  identify themselves). `AUTH_PROVIDER=clerk` verifies a real Clerk/OIDC JWT
+  against the issuer's JWKS.
+- **Projects** are selected with `X-Project-Id` / `X-Project-Slug` (or
+  `?project_id=`); requests without one use the workspace's default project.
+- **Project API keys** (`drk_<prefix>_<secret>`) authenticate machine access.
+  Only a salted hash is stored. Keys can read data-plane endpoints but cannot
+  administer workspaces.
+- **Migrations** are managed by Alembic: `cd apps/backend && alembic upgrade head`.
+  Set `DATABASE_AUTO_CREATE=false` in production.
+- **Sessions** are shared through a pluggable store (`SESSION_BACKEND=memory` for
+  a single process, `redis` for multiple replicas).
+
+Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/members`,
+`GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`, and
+`GET/POST/DELETE /projects/{id}/api-keys`.
+
 ### Deployment Considerations
 
-- **Single-tenant today**: multi-tenant isolation is on the roadmap, not implemented
+- **Multi-tenant (Phase 1)**: workspace/project isolation is enforced in the
+  backend. Remaining gap: guardrail/approval/audit state is still process-local
+  and not yet partitioned per project.
 - **Not certified**: DevRelAgent holds no security certification and makes no
   compliance guarantee. It implements some controls that *support* compliance
   work (PII redaction, audit logging, approval gates); certification would
   require an independent audit.
-- **Scale**: the API is async and can run multiple replicas, but sessions and
-  vector indexes are currently process-local
+- **Scale**: the API is async and can run multiple replicas with
+  `SESSION_BACKEND=redis`; vector indexes remain process-local
 - **Monitoring**: health and metrics endpoints are provided
 
 ### Support

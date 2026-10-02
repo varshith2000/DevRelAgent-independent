@@ -21,6 +21,7 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.settings import get_settings
+from db.session import init_db
 from guardrails.approval_guard import get_approval_guard
 from observability.logging import configure_logging
 from routes.approvals import router as approvals_router
@@ -28,6 +29,8 @@ from routes.audit import router as audit_router
 from routes.chat import router as chat_router
 from routes.chat import start_cleanup_task
 from routes.dashboard import router as dashboard_router
+from routes.identity import router as identity_router
+from routes.workspaces import router as workspaces_router
 from scheduler import HealthCheckScheduler
 from tools.clickhouse_tool import get_clickhouse_tool
 from tools.registry import ToolCategory, get_registry
@@ -45,6 +48,15 @@ async def lifespan(app: FastAPI):
 
     # Fail fast with a clear list of any missing required configuration.
     settings.validate_startup()
+
+    # Ensure the system-of-record schema exists (dev/CI). Production should run
+    # `alembic upgrade head` with DATABASE_AUTO_CREATE=false.
+    if settings.database_auto_create:
+        try:
+            init_db()
+            logger.info("[OK] System-of-record schema ready")
+        except Exception as e:
+            logger.warning(f"⚠️ Database initialization failed: {e}")
 
     # Initialize tool registry
     registry = get_registry()
@@ -253,6 +265,8 @@ async def health_check():
 
 
 # ─── Route Registration ────────────────────────────────
+app.include_router(identity_router)
+app.include_router(workspaces_router)
 app.include_router(chat_router, tags=["chat"])
 app.include_router(dashboard_router, tags=["dashboard"])
 app.include_router(approvals_router, tags=["approvals"])

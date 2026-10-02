@@ -11,14 +11,17 @@ import logging
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from auth.deps import get_request_context
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from guardrails.approval_guard import get_approval_guard
 from scheduler import get_health_scheduler
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(get_request_context)]
+)
 
 
 # Global SSE queues for streaming

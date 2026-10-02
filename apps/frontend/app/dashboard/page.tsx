@@ -4,8 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { Activity, Bot } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DashboardFeed } from '../../components/DashboardFeed';
+import { ProjectSwitcher } from '../../components/ProjectSwitcher';
 import { SystemStatus } from '../../components/SystemStatus';
-import { apiUrl } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 
 interface ServiceStatus {
   [key: string]: 'green' | 'yellow' | 'red';
@@ -20,7 +21,7 @@ export default function DashboardPage() {
     // Fetch initial system status
     const fetchStatus = async () => {
       try {
-        const response = await fetch(apiUrl('/dashboard/status'));
+        const response = await apiFetch('/dashboard/status');
         const data = await response.json();
         if (data.services) {
           setServiceStatus(data.services);
@@ -64,6 +65,9 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            <div className="flex items-center space-x-3">
+            <ProjectSwitcher />
+
             {/* Navigation Tabs */}
             <div className="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 rounded-lg p-1">
               <button
@@ -79,6 +83,7 @@ export default function DashboardPage() {
                 <Activity className="w-4 h-4" />
                 <span>Dashboard</span>
               </button>
+            </div>
             </div>
           </div>
         </header>

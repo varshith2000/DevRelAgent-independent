@@ -72,6 +72,51 @@ def _no_network_llm(monkeypatch):
     yield
 
 
+# ============== Tenancy / HTTP client ==============
+
+
+@pytest.fixture
+def db_engine(tmp_path, monkeypatch):
+    """Bind the app to a throwaway SQLite database for one test."""
+    from db import models  # noqa: F401  (register tables)
+    from db.base import Base
+    from db.session import reset_engine
+    from sqlalchemy import create_engine
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'test.db'}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+
+    from auth.provider import reset_auth_provider
+    from sessions.store import MemorySessionStore, reset_session_store
+
+    reset_engine(engine)
+    reset_auth_provider()
+    reset_session_store(MemorySessionStore())
+    yield engine
+
+    reset_engine(None)
+    reset_auth_provider()
+    reset_session_store(None)
+    engine.dispose()
+
+
+@pytest.fixture
+def api_client(db_engine):
+    """A TestClient for the app bound to the throwaway database.
+
+    The lifespan is intentionally not run: startup validates configuration and
+    initialises heavyweight singletons, none of which this suite depends on.
+    """
+    from fastapi.testclient import TestClient
+    from main import app
+
+    return TestClient(app)
+
+
 # ============== Mock Fixtures ==============
 
 

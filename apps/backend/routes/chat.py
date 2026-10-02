@@ -38,7 +38,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from auth.deps import RequestContext, get_request_context
+from config.settings import get_settings
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
@@ -54,6 +56,7 @@ from models.schemas import (
     SessionContext,
     ToolCallResult,
 )
+from sessions.store import get_session_store
 from tools.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -61,42 +64,82 @@ logger = logging.getLogger(__name__)
 # Router
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# Session storage (in production, use Redis or database)
-_sessions: Dict[str, SessionContext] = {}
-_session_lock = asyncio.Lock()
+# Sessions are namespaced by project so tenants never share conversation state.
+SESSION_PREFIX = "devrel:session:"
+
+
+def _session_key(project_id: str, session_id: str) -> str:
+    return f"{SESSION_PREFIX}{project_id}:{session_id}"
+
+
+def _scope_id(context: RequestContext) -> str:
+    """Namespace for sessions: the active project, else the workspace."""
+    if context.project is not None:
+        return context.project.id
+    return context.workspace.id
+
+
+def _session_ttl() -> int:
+    return max(1, get_settings().session_ttl_minutes) * 60
+
+
+def save_session(project_id: str, session: SessionContext) -> None:
+    """Persist a session's current state."""
+    get_session_store().set(
+        _session_key(project_id, session.session_id),
+        session.model_dump_json(),
+        _session_ttl(),
+    )
 
 
 # Session management
-async def get_or_create_session(session_id: Optional[str]) -> SessionContext:
-    """Get existing session or create new one."""
-    async with _session_lock:
-        if session_id and session_id in _sessions:
-            session = _sessions[session_id]
+async def get_or_create_session(session_id: Optional[str], project_id: str = "default") -> SessionContext:
+    """Get an existing session for this project or create a new one."""
+    store = get_session_store()
+
+    if session_id:
+        raw = store.get(_session_key(project_id, session_id))
+        if raw:
+            session = SessionContext.model_validate_json(raw)
             session.last_activity = datetime.now()
+            save_session(project_id, session)
             return session
 
-        # Create new session
-        new_session_id = session_id or str(uuid.uuid4())
-        session = SessionContext(session_id=new_session_id)
-        _sessions[new_session_id] = session
-        logger.info(f"Created new session: {new_session_id}")
-        return session
+    new_session_id = session_id or str(uuid.uuid4())
+    session = SessionContext(session_id=new_session_id)
+    save_session(project_id, session)
+    logger.info("Created new session: %s (project=%s)", new_session_id, project_id)
+    return session
+
+
+def list_project_sessions(project_id: str) -> List[SessionContext]:
+    """Return every live session belonging to a project."""
+    store = get_session_store()
+    prefix = f"{SESSION_PREFIX}{project_id}:"
+    sessions: List[SessionContext] = []
+    for key in store.keys(prefix):
+        raw = store.get(key)
+        if raw:
+            sessions.append(SessionContext.model_validate_json(raw))
+    return sessions
 
 
 async def cleanup_old_sessions(max_age_minutes: int = 60):
-    """Clean up inactive sessions."""
-    async with _session_lock:
-        now = datetime.now()
-        to_remove = []
-
-        for session_id, session in _sessions.items():
-            age = (now - session.last_activity).total_seconds() / 60
-            if age > max_age_minutes:
-                to_remove.append(session_id)
-
-        for session_id in to_remove:
-            del _sessions[session_id]
-            logger.info(f"Cleaned up session: {session_id}")
+    """Delete sessions that have been idle for too long, across all projects."""
+    store = get_session_store()
+    now = datetime.now()
+    for key in store.keys(SESSION_PREFIX):
+        raw = store.get(key)
+        if not raw:
+            continue
+        try:
+            session = SessionContext.model_validate_json(raw)
+        except Exception:
+            store.delete(key)
+            continue
+        if (now - session.last_activity).total_seconds() / 60 > max_age_minutes:
+            store.delete(key)
+            logger.info("Cleaned up session: %s", session.session_id)
 
 
 # Agent loop singleton
@@ -115,7 +158,10 @@ def get_agent_loop() -> AgentLoop:
 
 @router.post("", response_model=ChatResponse)
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    context: RequestContext = Depends(get_request_context),
+):
     """
     Main chat endpoint.
 
@@ -128,9 +174,10 @@ async def chat(request: ChatRequest):
     Returns:
         ChatResponse with agent response and tool call results
     """
+    project_id = _scope_id(context)
     try:
         # Get or create session
-        session = await get_or_create_session(request.session_id)
+        session = await get_or_create_session(request.session_id, project_id)
 
         # Get agent loop
         agent = get_agent_loop()
@@ -199,6 +246,8 @@ async def chat(request: ChatRequest):
         if tool_calls:
             session.tool_call_history.extend(tool_calls)
 
+        save_session(project_id, session)
+
         # Build response
         return ChatResponse(
             response=response_text,
@@ -222,9 +271,11 @@ async def chat(request: ChatRequest):
 
 @router.get("/stream")
 async def chat_stream(
+    request: Request,
     message: str = Query(..., description="User message"),
     session_id: Optional[str] = Query(None, description="Session ID"),
     include_tool_calls: bool = Query(True, description="Include tool call events"),
+    context: RequestContext = Depends(get_request_context),
 ) -> StreamingResponse:
     """
     Server-Sent Events (SSE) streaming chat endpoint.
@@ -245,11 +296,13 @@ async def chat_stream(
     Returns:
         StreamingResponse with SSE events
     """
+    project_id = _scope_id(context)
+
     async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events."""
         try:
             # Get or create session
-            session = await get_or_create_session(session_id)
+            session = await get_or_create_session(session_id, project_id)
 
             # Get agent loop
             agent = get_agent_loop()
@@ -260,6 +313,7 @@ async def chat_stream(
                 "content": message,
                 "timestamp": datetime.now().isoformat(),
             })
+            save_session(project_id, session)
 
             # Send session ID first
             yield _format_sse({
@@ -307,6 +361,8 @@ async def chat_stream(
                     if tool_calls:
                         session.tool_call_history.extend(tool_calls)
 
+                    save_session(project_id, session)
+
                     # Send done event
                     yield _format_sse(ChatStreamChunk(
                         type="done",
@@ -339,7 +395,10 @@ def _format_sse(data: dict) -> str:
 
 
 @router.get("/history/{session_id}")
-async def get_history(session_id: str) -> SessionContext:
+async def get_history(
+    session_id: str,
+    context: RequestContext = Depends(get_request_context),
+) -> SessionContext:
     """
     Get conversation history for a session.
 
@@ -349,14 +408,18 @@ async def get_history(session_id: str) -> SessionContext:
     Returns:
         SessionContext with full conversation history
     """
-    if session_id not in _sessions:
+    raw = get_session_store().get(_session_key(_scope_id(context), session_id))
+    if raw is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return _sessions[session_id]
+    return SessionContext.model_validate_json(raw)
 
 
 @router.delete("/session/{session_id}")
-async def delete_session(session_id: str) -> Dict[str, str]:
+async def delete_session(
+    session_id: str,
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, str]:
     """
     Delete a session and clear its history.
 
@@ -366,18 +429,20 @@ async def delete_session(session_id: str) -> Dict[str, str]:
     Returns:
         Confirmation message
     """
-    if session_id not in _sessions:
+    key = _session_key(_scope_id(context), session_id)
+    if get_session_store().get(key) is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    async with _session_lock:
-        del _sessions[session_id]
+    get_session_store().delete(key)
 
-    logger.info(f"Deleted session: {session_id}")
+    logger.info("Deleted session: %s", session_id)
     return {"message": f"Session {session_id} deleted"}
 
 
 @router.get("/sessions")
-async def list_sessions() -> Dict[str, List[Dict[str, Any]]]:
+async def list_sessions(
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, List[Dict[str, Any]]]:
     """
     List all active sessions.
 
@@ -386,7 +451,7 @@ async def list_sessions() -> Dict[str, List[Dict[str, Any]]]:
     """
     sessions = []
 
-    for session in _sessions.values():
+    for session in list_project_sessions(_scope_id(context)):
         sessions.append({
             "session_id": session.session_id,
             "message_count": len(session.messages),
@@ -414,9 +479,10 @@ async def cleanup_sessions(
     Returns:
         Count of cleaned up sessions
     """
-    before_count = len(_sessions)
+    store = get_session_store()
+    before_count = len(store.keys(SESSION_PREFIX))
     await cleanup_old_sessions(max_age_minutes)
-    after_count = len(_sessions)
+    after_count = len(store.keys(SESSION_PREFIX))
 
     cleaned = before_count - after_count
 
@@ -428,11 +494,14 @@ async def cleanup_sessions(
 
 # Health check for chat service
 @router.get("/health")
-async def chat_health() -> Dict[str, Any]:
+async def chat_health(
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, Any]:
     """Health check for chat service."""
     return {
         "status": "healthy",
-        "active_sessions": len(_sessions),
+        "active_sessions": len(get_session_store().keys(SESSION_PREFIX)),
+        "scoped_sessions": len(list_project_sessions(_scope_id(context))),
         "agent_ready": _agent_loop is not None,
         "timestamp": datetime.now().isoformat(),
     }

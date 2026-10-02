@@ -8,14 +8,18 @@ Frontend uses these endpoints to respond to approval requests.
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from auth.deps import get_request_context
+from fastapi import APIRouter, Depends, HTTPException, Query
 from guardrails.approval_guard import get_approval_guard
 from models.approval import ApprovalRequest, ApprovalResponse, ApprovalStatus
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/approvals", tags=["approvals"])
+# Every approvals endpoint requires an authenticated caller.
+router = APIRouter(
+    prefix="/approvals", tags=["approvals"], dependencies=[Depends(get_request_context)]
+)
 
 
 # Request/Response models for the API

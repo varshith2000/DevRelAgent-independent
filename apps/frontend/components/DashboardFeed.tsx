@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { AlertCard } from './AlertCard';
-import { apiUrl } from '../lib/api';
+import { apiFetch, authUrl } from '../lib/api';
+import { IDENTITY_EVENT } from '../lib/auth';
 
 interface DashboardEvent {
   id: string;
@@ -25,6 +26,14 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
   const [events, setEvents] = useState<DashboardEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped whenever the identity or active project changes, to reconnect.
+  const [scope, setScope] = useState(0);
+
+  useEffect(() => {
+    const onIdentityChange = () => setScope((n) => n + 1);
+    window.addEventListener(IDENTITY_EVENT, onIdentityChange);
+    return () => window.removeEventListener(IDENTITY_EVENT, onIdentityChange);
+  }, []);
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
@@ -32,7 +41,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
     const connect = () => {
       try {
-        eventSource = new EventSource(apiUrl('/dashboard/stream'));
+        eventSource = new EventSource(authUrl('/dashboard/stream'));
 
         eventSource.onopen = () => {
           setIsConnected(true);
@@ -83,7 +92,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
     connect();
 
     // Initial fetch of recent alerts
-    fetch(apiUrl('/dashboard/alerts?limit=20'))
+    apiFetch('/dashboard/alerts?limit=20')
       .then(res => res.json())
       .then(data => {
         if (data.alerts) {
@@ -100,11 +109,11 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
         eventSource.close();
       }
     };
-  }, []);
+  }, [scope]);
 
   const handleRefresh = useCallback(async () => {
     try {
-      const response = await fetch(apiUrl('/dashboard/alerts?limit=20'));
+      const response = await apiFetch('/dashboard/alerts?limit=20');
       const data = await response.json();
       if (data.alerts) {
         setEvents(data.alerts);

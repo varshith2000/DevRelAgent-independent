@@ -78,6 +78,35 @@ class Settings(BaseSettings):
     google_api_key: Optional[str] = None
     z_ai_api_key: Optional[str] = None
 
+    # ── System of record (Phase 1) ────────────────────────────────────────
+    # SQLite by default so a fresh clone runs with no infrastructure; point
+    # at Postgres (e.g. Supabase) with DATABASE_URL for anything real.
+    database_url: str = "sqlite:///./data/devrelagent.db"
+    database_echo: bool = False
+    # Create missing tables at startup (dev/CI convenience). Turn this off in
+    # production and run `alembic upgrade head` instead.
+    database_auto_create: bool = True
+
+    # ── Identity ──────────────────────────────────────────────────────────
+    # "dev" trusts X-Dev-* headers (local development and tests).
+    # "clerk" verifies a real Clerk/OIDC JWT against the JWKS endpoint.
+    auth_provider: str = "dev"
+    clerk_jwks_url: Optional[str] = None
+    clerk_issuer: Optional[str] = None
+    clerk_audience: Optional[str] = None
+    dev_user_email: str = "dev@localhost"
+    dev_user_name: str = "Dev User"
+    dev_workspace_slug: str = "dev-workspace"
+    # Salt for hashing API keys at rest. Set this in any real deployment.
+    api_key_pepper: Optional[str] = None
+
+    # ── Shared session store ──────────────────────────────────────────────
+    # "memory" keeps sessions process-local (single worker only).
+    # "redis" shares them across replicas.
+    session_backend: str = "memory"
+    redis_url: str = "redis://localhost:6379/0"
+    session_ttl_minutes: int = 60
+
     # ── Health check scheduler ────────────────────────────────────────────
     health_check_enabled: bool = False
     health_check_interval_minutes: int = 5
@@ -142,6 +171,10 @@ class Settings(BaseSettings):
 
     # ── Derived helpers ───────────────────────────────────────────────────
     @property
+    def is_sqlite(self) -> bool:
+        return self.database_url.startswith("sqlite")
+
+    @property
     def allowed_urls_list(self) -> List[str]:
         """Allowed browser URLs as a cleaned list."""
         return [url.strip() for url in self.allowed_urls.split(",") if url.strip()]
@@ -172,6 +205,12 @@ class Settings(BaseSettings):
 
         if self.health_check_enabled and not self.clickhouse_host:
             missing.append("CLICKHOUSE_HOST")
+
+        if (self.auth_provider or "dev").lower() == "clerk":
+            if not (self.clerk_jwks_url or self.clerk_issuer):
+                missing.append("CLERK_JWKS_URL")
+            if not self.clerk_issuer:
+                missing.append("CLERK_ISSUER")
 
         return missing
 

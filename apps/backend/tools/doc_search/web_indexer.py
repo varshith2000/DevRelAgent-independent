@@ -15,18 +15,19 @@ Usage:
     chunks = indexer.ingest("https://example.com/article")
 """
 
-import sys
-import re
 import hashlib
-from pathlib import Path
-from typing import List, Dict, Optional
+import re
+import sys
 from datetime import datetime
-from urllib.parse import urlparse, urljoin
+from pathlib import Path
+from typing import Dict, List, Optional
+from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
+
+from tools.doc_search.base import DocumentIndexer
 
 try:
     import trafilatura

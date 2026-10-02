@@ -196,27 +196,32 @@ python tests/test_code_search.py
 - [ProjectPlan.md](./ProjectPlan.md) — Full project proposal and architecture
 - [Issues.md](./Issues.md) — Detailed issue breakdown by phase
 
-## Production Documentation
+## Documentation
+
+> **Project status: active development / prototype.** There is currently **no
+> authentication** on the API and **no multi-tenant isolation**. These are the
+> first deliverables of the roadmap (Phase 1). Do not expose this service to an
+> untrusted network.
 
 ### Security & Governance
 
-- **[Security Model](./docs/security.md)** - Complete security architecture, threat mitigation, and compliance features
+- **[Security Model](./docs/security.md)** - Security architecture, implemented controls, and threat mitigation
 - **[Capabilities](./docs/capabilities.md)** - What DevRelAgent can and cannot do, risk levels, and usage guidelines
 - **[Disabling](./docs/disable.md)** - How to disable or shut down DevRelAgent in various scenarios
 
 ### Operational Documentation
 
 - **[Incident Scenarios](./docs/incidents.md)** - Real-world incident examples and how DevRelAgent helps resolve them
-- **[Audit Trail](./apps/backend/audit/)** - Complete audit logging for compliance and security
+- **[Audit Trail](./apps/backend/audit/)** - Audit logging for security and traceability
 - **[Guardrails](./apps/backend/guardrails/)** - Input/output/tool validation and approval workflows
 
-### Key Production Features
+### Key Features
 
 #### **Audit Trail**
-- Complete logging of all user interactions and tool executions
-- Tamper-evident audit logs with cryptographic hashing
-- Export capabilities (JSON/CSV) for compliance reporting
-- Data access tracking and approval history
+- Logging of user interactions and tool executions
+- Append-only JSONL audit files (content hashing / tamper evidence is not yet implemented)
+- Export capabilities (JSON/CSV) for reporting
+- Approval history
 
 #### **Security Controls**
 - Multi-layer guardrails (input, output, tool)
@@ -237,10 +242,14 @@ python tests/test_code_search.py
 
 ### Deployment Considerations
 
-- **Multi-Tenant Support**: Optional tenant isolation for enterprise deployments
-- **Compliance Ready**: SOC 2, HIPAA, GDPR, PCI DSS support
-- **Scalable Architecture**: Horizontal scaling with stateless API design
-- **Monitoring**: Health checks, metrics, and alerting integration
+- **Single-tenant today**: multi-tenant isolation is on the roadmap, not implemented
+- **Not certified**: DevRelAgent holds no security certification and makes no
+  compliance guarantee. It implements some controls that *support* compliance
+  work (PII redaction, audit logging, approval gates); certification would
+  require an independent audit.
+- **Scale**: the API is async and can run multiple replicas, but sessions and
+  vector indexes are currently process-local
+- **Monitoring**: health and metrics endpoints are provided
 
 ### Support
 

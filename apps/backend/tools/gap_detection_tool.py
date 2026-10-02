@@ -6,12 +6,12 @@ Optionally creates tickets for missing content.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Literal, Set
-from datetime import datetime
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Set
 
-from tools.registry import tool, ToolCategory
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 

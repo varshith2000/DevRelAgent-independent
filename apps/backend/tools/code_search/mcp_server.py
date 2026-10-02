@@ -14,19 +14,17 @@ Tools:
 - list_indexed_repos: List all indexed repos
 """
 
-import sys
 import json
 import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
 from mcp.server.fastmcp import FastMCP
 
-from tools.code_search.config import (
-    REPOS_DIR, INDEX_DIR, SUPPORTED_EXTENSIONS, IGNORE_PATTERNS
-)
-from tools.code_search.code_chunker import get_chunker, detect_repo_language
+from tools.code_search.code_chunker import detect_repo_language, get_chunker
+from tools.code_search.config import IGNORE_PATTERNS, INDEX_DIR, REPOS_DIR, SUPPORTED_EXTENSIONS
 from tools.code_search.vector_store import VectorMemory
 
 # Initialize MCP server

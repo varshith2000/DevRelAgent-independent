@@ -17,19 +17,21 @@ Usage:
 
 import json
 import logging
-import os
-from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime, timedelta
-import httpx
+from typing import Any, Dict, List, Literal, Optional
 
-from tools.registry import tool, ToolCategory
+import httpx
+from config.settings import get_settings
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 
-# Grafana Configuration
-GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
-GRAFANA_API_TOKEN = os.getenv("GRAFANA_API_TOKEN", "")
-GRAFANA_DEFAULT_DATASOURCE = os.getenv("GRAFANA_DEFAULT_DATASOURCE", "ClickHouse")
+# Grafana Configuration (single source of truth: config.settings)
+_settings = get_settings()
+GRAFANA_URL = _settings.grafana_url
+GRAFANA_API_TOKEN = _settings.grafana_api_token
+GRAFANA_DEFAULT_DATASOURCE = _settings.grafana_default_datasource
 
 # Headers for Grafana API
 GRAFANA_HEADERS = {

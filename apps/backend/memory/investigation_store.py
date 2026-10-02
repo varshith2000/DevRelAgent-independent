@@ -8,17 +8,19 @@ Provides learning memory from past investigations.
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from models.schemas import InvestigationState, AgentObservation, LearningMemory
+from config.settings import get_settings
+from models.schemas import AgentObservation, InvestigationState, LearningMemory
 
 logger = logging.getLogger(__name__)
 
-# Storage paths
-INVESTIGATION_STORAGE_PATH = os.getenv("INVESTIGATION_STORAGE_PATH", "data/investigations")
-LEARNING_MEMORY_PATH = os.getenv("LEARNING_MEMORY_PATH", "data/learning_memory.json")
+# Storage paths (single source of truth: config.settings)
+_settings = get_settings()
+INVESTIGATION_STORAGE_PATH = _settings.investigation_storage_path
+LEARNING_MEMORY_PATH = _settings.learning_memory_path
 
 
 class InvestigationStore:

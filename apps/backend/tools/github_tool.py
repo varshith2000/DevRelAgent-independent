@@ -7,16 +7,16 @@ All write operations require mandatory HITL approval (enforced automatically by 
 
 import asyncio
 import logging
-import os
-from typing import Dict, Any, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
+from config.settings import get_settings
 
-from tools.registry import tool, ToolCategory
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_TOKEN = get_settings().github_token
 GITHUB_API_BASE = "https://api.github.com"
 
 

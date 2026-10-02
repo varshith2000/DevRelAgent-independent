@@ -4,7 +4,7 @@ Skills Framework — Composable multi-tool workflows
 Skills chain multiple tools together to accomplish complex tasks.
 """
 
-from .base import Skill, SkillResult, SkillRegistry, get_skill_registry, skill
+from .base import Skill, SkillRegistry, SkillResult, get_skill_registry, skill
 from .diagnose_error import DiagnoseErrorSkill
 from .search_docs import SearchDocsSkill
 

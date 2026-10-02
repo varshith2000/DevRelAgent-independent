@@ -5,8 +5,8 @@ Run this script to verify your ClickHouse Cloud connection works.
 Usage: python test_clickhouse.py
 """
 
-import sys
 import os
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -5,11 +5,11 @@ Paths, embedding settings, supported extensions, and ignore patterns.
 Adapted from CodeRepoSemanticSearch/config.py
 """
 
-import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv()
+from config.settings import get_settings
+
+_settings = get_settings()
 
 # Base paths (relative to project root)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.resolve()
@@ -22,12 +22,12 @@ REPOS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # Ollama Embedding Settings
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_EMBED_URL = os.getenv("OLLAMA_EMBED_URL", f"{OLLAMA_BASE_URL}/api/embeddings")
-OLLAMA_URL = os.getenv("OLLAMA_URL", f"{OLLAMA_BASE_URL}/api/generate")  # For vision models
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+OLLAMA_BASE_URL = _settings.ollama_base_url
+OLLAMA_EMBED_URL = _settings.resolved_ollama_embed_url
+OLLAMA_URL = _settings.resolved_ollama_generate_url  # For vision models
+EMBED_MODEL = _settings.embed_model
 EMBED_DIMENSION = 768  # nomic-embed-text dimension
-VISION_MODEL = os.getenv("VISION_MODEL", "llava")  # For image captioning
+VISION_MODEL = _settings.vision_model  # For image captioning
 
 # Chunking Settings
 CHUNK_SIZE = 256   # words per chunk (text fallback)

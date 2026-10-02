@@ -21,19 +21,20 @@ Features:
 
 import logging
 import signal
-from typing import List, Dict, Any, Optional, Tuple
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-import sys
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from database import get_clickhouse_client
-from tools.clickhouse_schema import ClickHouseSchemaExplorer, get_schema_explorer
-from guardrails.sql_guard import SQLGuard, is_safe_sql
 from agent.llm_provider import llm_generate
+from database import get_clickhouse_client
+from guardrails.sql_guard import SQLGuard, is_safe_sql
+
+from tools.clickhouse_schema import ClickHouseSchemaExplorer, get_schema_explorer
 
 logger = logging.getLogger(__name__)
 
@@ -487,7 +488,7 @@ SQL:"""
                 lines.append(f"\nExecution time: {result.execution_time_ms}ms")
 
         elif result.status == QueryStatus.UNSAFE_SQL:
-            lines.append(f"[ERROR] Query rejected for safety reasons")
+            lines.append("[ERROR] Query rejected for safety reasons")
             lines.append(f"Reason: {result.error_message}")
             if result.sql:
                 lines.append(f"\nBlocked SQL: {result.sql}")
@@ -496,7 +497,7 @@ SQL:"""
             lines.append(f"[ERROR] Query exceeded timeout limit ({self.query_timeout}s)")
 
         elif result.status == QueryStatus.ERROR:
-            lines.append(f"[ERROR] Query execution failed")
+            lines.append("[ERROR] Query execution failed")
             lines.append(f"Error: {result.error_message}")
             if result.sql:
                 lines.append(f"\nFailed SQL: {result.sql}")

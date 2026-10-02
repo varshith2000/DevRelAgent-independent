@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import { API_BASE_URL } from '../lib/api';
 
 interface SSEChunk {
     type: 'session_start' | 'token' | 'tool_call' | 'explanation' | 'error' | 'done';
@@ -44,7 +45,7 @@ interface UseSSEStreamingResult {
 
 export function useSSEStreaming(options: UseSSEStreamingOptions = {}): UseSSEStreamingResult {
     const {
-        apiUrl = 'http://localhost:8000',
+        apiUrl = API_BASE_URL,
         reconnectInterval = 3000,
         maxReconnectAttempts = 3,
     } = options;

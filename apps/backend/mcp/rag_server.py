@@ -11,16 +11,17 @@ MCP Tools:
 - preview_document: Preview document content
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
 from typing import List
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp.server.fastmcp import FastMCP
 from tools.doc_search.rag_tool import RagTool
+
+from mcp.server.fastmcp import FastMCP
 
 # Initialize MCP server
 mcp = FastMCP("RAG Document Server")

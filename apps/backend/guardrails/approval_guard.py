@@ -8,10 +8,10 @@ Integrates with SSE streaming to request approvals from the frontend.
 import asyncio
 import logging
 import uuid
-from typing import Dict, List, Optional, Any, Literal
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Literal, Optional
 
-from models.approval import ApprovalRequest, ApprovalResponse, ApprovalEvent
+from models.approval import ApprovalEvent, ApprovalRequest, ApprovalResponse
 
 logger = logging.getLogger(__name__)
 

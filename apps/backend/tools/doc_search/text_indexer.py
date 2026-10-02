@@ -11,8 +11,9 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
+
+from tools.doc_search.base import DocumentIndexer
 
 
 class TextIndexer(DocumentIndexer):

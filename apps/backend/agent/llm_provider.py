@@ -11,17 +11,16 @@ Usage:
     response = llm_generate("Explain this code", max_tokens=1000)
 """
 
-import os
 import logging
 from typing import Optional
-from dotenv import load_dotenv
 
-load_dotenv()
+from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001")
+_settings = get_settings()
+LLM_PROVIDER = _settings.llm_provider.lower()
+LLM_MODEL = _settings.llm_model
 
 # Supported Gemini models (free and paid)
 GEMINI_MODELS = [
@@ -59,7 +58,7 @@ class AnthropicProvider(LLMProvider):
     def __init__(self, model: str):
         super().__init__(model)
         from anthropic import Anthropic
-        self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.client = Anthropic(api_key=get_settings().anthropic_api_key)
 
     def generate(self, prompt: str, max_tokens: int = 1000, system: Optional[str] = None) -> str:
         kwargs = {
@@ -79,7 +78,7 @@ class OpenAIProvider(LLMProvider):
     def __init__(self, model: str):
         super().__init__(model)
         from openai import OpenAI
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = OpenAI(api_key=get_settings().openai_api_key)
 
     def generate(self, prompt: str, max_tokens: int = 1000, system: Optional[str] = None) -> str:
         messages = []
@@ -100,7 +99,7 @@ class GeminiProvider(LLMProvider):
     def __init__(self, model: str):
         super().__init__(model)
         from google import genai
-        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.client = genai.Client(api_key=get_settings().google_api_key)
         # Ensure model name has the correct prefix for the GenAI SDK
         if not model.startswith("models/"):
             self.model = f"models/{model}"
@@ -139,7 +138,7 @@ class ZAIProvider(LLMProvider):
         from openai import OpenAI
         # Zhipu AI uses OpenAI-compatible API with JWT authentication
         # The API key format should be: id.secret
-        api_key = os.getenv("Z_AI_API_KEY")
+        api_key = get_settings().z_ai_api_key
         # Validate API key format
         if not api_key or "." not in api_key:
             raise ValueError("Z_AI_API_KEY must be in format: id.secret (e.g., 12345678.abcdef)")

@@ -7,17 +7,16 @@ Uses nomic-embed-text via Ollama for embeddings, FAISS for vector search.
 Supports save/load to disk for persistent indexes.
 """
 
-import sys
 import json
 import pickle
-import requests
-import numpy as np
+import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
-from tools.code_search.config import (
-    OLLAMA_EMBED_URL, EMBED_MODEL, EMBED_DIMENSION, INDEX_DIR
-)
+import numpy as np
+import requests
+
+from tools.code_search.config import EMBED_DIMENSION, EMBED_MODEL, INDEX_DIR, OLLAMA_EMBED_URL
 
 try:
     from models.schemas import CodeChunk

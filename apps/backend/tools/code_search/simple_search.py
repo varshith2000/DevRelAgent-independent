@@ -8,12 +8,10 @@ It provides basic code search capabilities for demo purposes.
 import json
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from tools.code_search.config import (
-    REPOS_DIR, INDEX_DIR, SUPPORTED_EXTENSIONS, IGNORE_PATTERNS
-)
-from tools.code_search.code_chunker import get_chunker, detect_repo_language
+from tools.code_search.code_chunker import detect_repo_language, get_chunker
+from tools.code_search.config import IGNORE_PATTERNS, INDEX_DIR, REPOS_DIR, SUPPORTED_EXTENSIONS
 from tools.code_search.vector_store import VectorMemory
 
 

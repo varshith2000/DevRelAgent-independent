@@ -7,14 +7,15 @@ Extracts structured content from Word documents with heading hierarchy.
 import sys
 import uuid
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 from docx import Document
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.doc_search.base import DocumentIndexer
 from models.schemas import DocumentChunk, DocumentSearchResult, IndexStatus
+
+from tools.doc_search.base import DocumentIndexer
 
 
 class WordIndexer(DocumentIndexer):

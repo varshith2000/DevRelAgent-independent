@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local runtime artifacts (investigations, audit, dashboards, logs)
+apps/backend/data/
+data/
+*.log
+
+# The Python "lib/" packaging ignore above would otherwise hide frontend source
+!apps/frontend/lib/

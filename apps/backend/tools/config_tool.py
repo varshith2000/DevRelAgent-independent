@@ -7,13 +7,16 @@ All write operations require mandatory HITL approval.
 
 import json
 import logging
-import os
-from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
-from tools.registry import tool, ToolCategory
+from config.settings import get_settings
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
+
+_settings = get_settings()
 
 
 # ============== Configuration Templates ==============
@@ -21,12 +24,12 @@ logger = logging.getLogger(__name__)
 def _generate_clickhouse_config(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Generate ClickHouse configuration."""
     return {
-        "host": settings.get("host", os.getenv("CLICKHOUSE_HOST", "localhost")),
-        "port": settings.get("port", int(os.getenv("CLICKHOUSE_PORT", "8123"))),
-        "database": settings.get("database", os.getenv("CLICKHOUSE_DATABASE", "default")),
-        "user": settings.get("user", os.getenv("CLICKHOUSE_USER", "default")),
-        "password": settings.get("password", os.getenv("CLICKHOUSE_PASSWORD", "")),
-        "secure": settings.get("secure", os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true"),
+        "host": settings.get("host", _settings.clickhouse_host or "localhost"),
+        "port": settings.get("port", _settings.clickhouse_port or 8123),
+        "database": settings.get("database", _settings.clickhouse_database),
+        "user": settings.get("user", _settings.clickhouse_user),
+        "password": settings.get("password", _settings.clickhouse_password),
+        "secure": settings.get("secure", _settings.clickhouse_secure),
         "connect_timeout": settings.get("connect_timeout", 10),
         "send_receive_timeout": settings.get("send_receive_timeout", 300),
         "compress": settings.get("compress", True),
@@ -42,7 +45,7 @@ def _generate_github_config(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Generate GitHub configuration."""
     return {
         "api_base": settings.get("api_base", "https://api.github.com"),
-        "token": settings.get("token", os.getenv("GITHUB_TOKEN", "")),
+        "token": settings.get("token", _settings.github_token or ""),
         "default_branch": settings.get("default_branch", "main"),
         "repositories": settings.get("repositories", []),
         "webhook_secret": settings.get("webhook_secret", ""),

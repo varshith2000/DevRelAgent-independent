@@ -6,7 +6,9 @@ Provides a singleton client for ClickHouse Cloud operations.
 
 import logging
 from typing import Any, Optional
+
 import clickhouse_connect
+
 from .config import config
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ class ClickHouseClient:
 
     def _connect(self):
         """Establish connection to ClickHouse Cloud."""
+        config.validate()
         try:
             logger.info(f"Connecting to ClickHouse Cloud at {config.host}...")
             self._client = clickhouse_connect.get_client(**config.to_client_kwargs())

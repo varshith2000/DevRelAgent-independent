@@ -15,21 +15,23 @@ Tests:
 """
 
 import asyncio
-import pytest
 import json
+import os
+import sys
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Any
+from typing import Any, AsyncGenerator, Dict
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import sys
-import os
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../apps/backend"))
 
-from routes.chat import router as chat_router, get_agent_loop, get_or_create_session
-from models.schemas import ChatRequest, ChatResponse, SessionContext
 from agent.loop import AgentLoop
+from models.schemas import ChatRequest, ChatResponse, SessionContext
+from routes.chat import get_agent_loop, get_or_create_session
+from routes.chat import router as chat_router
 
 
 @pytest.fixture
@@ -127,7 +129,8 @@ class TestChatAPI:
         )
         assert response1.status_code == 200
         data1 = response1.json()
-        assert data1["metadata"]["message_count"] == 1
+        # A completed turn stores both the user message and the assistant reply.
+        assert data1["metadata"]["message_count"] == 2
 
         # Second message in same session
         response2 = test_client.post(
@@ -139,7 +142,7 @@ class TestChatAPI:
         )
         assert response2.status_code == 200
         data2 = response2.json()
-        assert data2["metadata"]["message_count"] == 2  # Should increment
+        assert data2["metadata"]["message_count"] == 4  # Two completed turns
 
         # Verify session exists
         history_response = test_client.get(f"/chat/history/{session_id}")
@@ -214,9 +217,9 @@ class TestChatAPI:
         # Collect stream chunks
         chunks = []
         for line in response.iter_lines():
-            if line:
+            if isinstance(line, bytes):
                 line = line.decode('utf-8')
-                if line.startswith("data: "):
+            if line and line.startswith("data: "):
                     data = json.loads(line[6:])
                     chunks.append(data)
 
@@ -329,13 +332,12 @@ class TestChatAPI:
         assert response.status_code == 200
         data = response.json()
 
-        # Should get a response about unclear intent
+        # Must always return a usable response...
         assert "response" in data
-        response_text = data["response"].lower()
+        assert len(data["response"]) > 0
 
-        # Response should indicate uncertainty or ask for clarification
-        uncertain_keywords = ["sure", "clarify", "understand", "help you with"]
-        assert any(keyword in response_text for keyword in uncertain_keywords)
+        # ...and low-confidence input must not silently execute a tool.
+        assert data["metadata"]["tool_call_count"] == 0
 
     def test_8_structured_output_format(self, test_client: TestClient):
         """

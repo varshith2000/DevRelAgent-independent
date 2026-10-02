@@ -4,10 +4,11 @@ Audit Trail Schemas - Production-Grade Data Models
 Defines all audit-related data structures with comprehensive validation.
 """
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Dict, Any, Literal, Union
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Literal, Optional, Union
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class ActionType(str, Enum):

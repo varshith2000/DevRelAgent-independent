@@ -13,14 +13,14 @@ Features:
 """
 
 import asyncio
+import hashlib
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Tuple, Any
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from functools import wraps
-import hashlib
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class SlidingWindowRateLimiter:
                     remaining=0,
                     reset_at=datetime.fromtimestamp(oldest_request + self.rule.window_seconds),
                     retry_after=retry_after,
-                    reason=f"Rate limit exceeded: {len(self.requests) requests/{self.rule.max_requests} max"
+                    reason=f"Rate limit exceeded: {len(self.requests)} requests/{self.rule.max_requests} max"
                 )
 
             # Request allowed - add to window

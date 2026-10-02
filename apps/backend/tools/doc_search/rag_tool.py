@@ -12,19 +12,20 @@ Usage:
 
 import sys
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.schemas import DocumentSearchResult
-from tools.doc_search.pdf_indexer import PdfIndexer
-from tools.doc_search.word_indexer import WordIndexer
-from tools.doc_search.text_indexer import TextIndexer
-from tools.doc_search.swagger_indexer import SwaggerIndexer
-from tools.doc_search.image_indexer import ImageIndexer
-from tools.doc_search.web_indexer import WebIndexer
-from tools.doc_search.vector_store import DocumentVectorStore
+
 from tools.doc_search.base import DocumentIndexer
+from tools.doc_search.image_indexer import ImageIndexer
+from tools.doc_search.pdf_indexer import PdfIndexer
+from tools.doc_search.swagger_indexer import SwaggerIndexer
+from tools.doc_search.text_indexer import TextIndexer
+from tools.doc_search.vector_store import DocumentVectorStore
+from tools.doc_search.web_indexer import WebIndexer
+from tools.doc_search.word_indexer import WordIndexer
 
 
 class RagTool:

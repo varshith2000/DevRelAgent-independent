@@ -11,6 +11,7 @@ Provides comprehensive audit logging with:
 
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -18,18 +19,19 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
-import hashlib
+from typing import Any, Dict, List, Optional, Union
+
+from config.settings import get_settings
 
 from .schemas import (
-    AuditEntry,
-    AuditFilter,
-    AuditExport,
-    AuditSummary,
     ActionType,
     ApprovalDecision,
-    GuardrailResult,
+    AuditEntry,
+    AuditExport,
+    AuditFilter,
+    AuditSummary,
     DataAccessed,
+    GuardrailResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -686,10 +688,11 @@ async def get_audit_logger() -> AuditLogger:
     if _audit_logger is None:
         async with _logger_lock:
             if _audit_logger is None:
-                # Read from environment
-                storage_path = os.getenv("AUDIT_LOG_PATH", "data/audit")
-                cache_size = int(os.getenv("AUDIT_CACHE_SIZE", "1000"))
-                enable_clickhouse = os.getenv("AUDIT_CLICKHOUSE_ENABLED", "false").lower() == "true"
+                # Read from central settings
+                settings = get_settings()
+                storage_path = settings.audit_log_path
+                cache_size = settings.audit_cache_size
+                enable_clickhouse = settings.audit_clickhouse_enabled
 
                 _audit_logger = AuditLogger(
                     storage_path=storage_path,

@@ -6,10 +6,12 @@ Uses LLM-based routing for accurate intent classification with fallback handling
 """
 
 import logging
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple
+
 from models.schemas import PerceptionResult
-from agent.llm_provider import llm_generate
 from tools.registry import get_registry
+
+from agent.llm_provider import llm_generate
 
 logger = logging.getLogger(__name__)
 

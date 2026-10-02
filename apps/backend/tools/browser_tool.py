@@ -9,17 +9,18 @@ Requires mandatory HITL approval before any browser action.
 import asyncio
 import base64
 import logging
-import os
-from typing import List, Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from tools.registry import tool, ToolCategory
+from config.settings import get_settings
 from guardrails.approval_guard import get_approval_guard
+
+from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
 
-# Allowed URLs whitelist from environment
-ALLOWED_URLS = os.getenv("ALLOWED_URLS", "localhost,127.0.0.1").split(",")
+# Allowed URLs whitelist (single source of truth: config.settings)
+ALLOWED_URLS = get_settings().allowed_urls_list
 
 
 @tool(
@@ -36,7 +37,7 @@ ALLOWED_URLS = os.getenv("ALLOWED_URLS", "localhost,127.0.0.1").split(",")
             "description": "List of actions to perform"
         }
     }
-})
+)
 async def browser_action(
     url: str,
     actions: List[Dict[str, Any]]

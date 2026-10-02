@@ -27,16 +27,24 @@ Usage:
 """
 
 import asyncio
+import inspect
+import json
 import logging
-from typing import (
-    Dict, Any, Callable, Optional, List,
-    Union, Awaitable, TypeVar, ParamSpec, Literal
-)
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import inspect
-import json
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    ParamSpec,
+    TypeVar,
+    Union,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -723,7 +731,7 @@ class ToolRegistry:
                 sanitized[key] = self._sanitize_arguments(value)
             elif isinstance(value, list):
                 sanitized[key] = [
-                    self._sanitize_arguments({k: v}) if isinstance(v, dict) else v
+                    self._sanitize_arguments(v) if isinstance(v, dict) else v
                     for v in value
                 ]
             else:

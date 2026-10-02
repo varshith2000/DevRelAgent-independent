@@ -10,9 +10,9 @@ Cron-based health checks that:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Literal
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Literal, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger

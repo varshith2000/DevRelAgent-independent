@@ -4,26 +4,26 @@ Test Input Guardrails — Topic classifier, PII scrubber, prompt injection detec
 Comprehensive test coverage for input validation guardrails.
 """
 
-import pytest
 import asyncio
-from typing import List, Dict, Any
-import sys
 import os
+import sys
+from typing import Any, Dict, List
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'apps', 'backend'))
 
 from guardrails.input_guard import (
-    InputGuardrail,
     GuardrailResult,
-    TopicClassifier,
+    InputGuardrail,
     PIIScrubber,
     PromptInjectionDetector,
     TopicCategory,
+    TopicClassifier,
     get_input_guardrail,
     set_input_guardrail,
     validate_input,
 )
-
 
 # ============== Topic Classifier Tests ==============
 

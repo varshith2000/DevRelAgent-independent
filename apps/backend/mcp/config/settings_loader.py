@@ -1,14 +1,12 @@
-"""
-Settings Loader for RAG MCP Server
+"""Settings Loader for RAG MCP Server.
 
-Minimal configuration - loads from environment variables with sensible defaults.
+All values are sourced from the central :mod:`config.settings` model so this
+file remains consistent with the rest of the backend.
 """
 
-import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv()
+from config.settings import get_settings
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.resolve()
@@ -17,38 +15,45 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 def get_ollama_url(service: str) -> str:
     """Get Ollama service URL."""
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    settings = get_settings()
     if service == "embeddings":
-        return os.getenv("OLLAMA_EMBED_URL", f"{base_url}/api/embeddings")
-    elif service == "chat":
-        return os.getenv("OLLAMA_CHAT_URL", f"{base_url}/v1/chat/completions")
-    elif service == "generate":
-        return os.getenv("OLLAMA_URL", f"{base_url}/api/generate")
-    return base_url
+        return settings.resolved_ollama_embed_url
+    if service == "chat":
+        return settings.resolved_ollama_chat_url
+    if service == "generate":
+        return settings.resolved_ollama_generate_url
+    return settings.ollama_base_url
 
 
 def get_model(purpose: str) -> str:
     """Get model name for a purpose."""
+    settings = get_settings()
     if purpose == "embedding":
-        return os.getenv("EMBED_MODEL", "nomic-embed-text")
-    elif purpose == "semantic_chunking":
-        return os.getenv("RAG_LLM_MODEL", "llama3.2")
-    elif purpose == "image_captioning":
-        return os.getenv("VISION_MODEL", "llava")
-    return os.getenv("LLM_MODEL", "llama3.2")
+        return settings.embed_model
+    if purpose == "semantic_chunking":
+        return settings.rag_llm_model
+    if purpose == "image_captioning":
+        return settings.vision_model
+    return settings.rag_llm_model
 
 
 def get_timeout() -> int:
     """Get timeout in seconds."""
-    return int(os.getenv("OLLAMA_TIMEOUT", "30"))
+    return get_settings().ollama_timeout
 
 
-# Default settings
-settings = {
-    "rag": {
-        "chunk_size": int(os.getenv("CHUNK_SIZE", "256")),
-        "chunk_overlap": int(os.getenv("CHUNK_OVERLAP", "40")),
-        "max_chunk_length": int(os.getenv("MAX_CHUNK_LENGTH", "1200")),
-        "top_k": int(os.getenv("TOP_K", "5")),
+def build_settings() -> dict:
+    """Build the default RAG settings block."""
+    settings = get_settings()
+    return {
+        "rag": {
+            "chunk_size": settings.chunk_size,
+            "chunk_overlap": settings.chunk_overlap,
+            "max_chunk_length": settings.max_chunk_length,
+            "top_k": settings.top_k,
+        }
     }
-}
+
+
+# Default settings (module-level, resolved from the central Settings model)
+settings = build_settings()

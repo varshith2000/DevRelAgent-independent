@@ -4,8 +4,8 @@ Conversation Memory — Short-term chat history management
 TODO: Phase 1 implementation
 """
 
-from typing import List, Dict, Optional
 from datetime import datetime
+from typing import Dict, List, Optional
 
 
 class ConversationMemory:

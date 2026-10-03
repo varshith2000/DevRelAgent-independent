@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     session_ttl_minutes: int = 60
 
+    # ── Human-in-the-loop ─────────────────────────────────────────────────
+    # How long an approval request waits for a decision before auto-rejecting.
+    approval_timeout_seconds: int = 300
+
     # ── Health check scheduler ────────────────────────────────────────────
     health_check_enabled: bool = False
     health_check_interval_minutes: int = 5

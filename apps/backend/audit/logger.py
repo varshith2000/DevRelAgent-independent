@@ -107,6 +107,19 @@ class AuditLogger:
                 if len(self._cache) > self.cache_size:
                     self._cache = self._cache[-self.cache_size:]
 
+            # Persist to the system of record, scoped to the owning tenant.
+            # tenant_id carries the active project id; workspace_id the workspace.
+            try:
+                from db import repositories
+
+                repositories.record_audit(
+                    sanitized_entry.model_dump(mode="json"),
+                    workspace_id=sanitized_entry.workspace_id,
+                    project_id=sanitized_entry.tenant_id,
+                )
+            except Exception as e:  # DB unavailable: file log still records it
+                logger.warning(f"Could not persist audit entry to database: {e}")
+
             # Write to file
             await self._write_to_file(sanitized_entry)
 
@@ -131,35 +144,59 @@ class AuditLogger:
         Returns:
             List of matching audit entries
         """
+        # Primary path: read the durable, tenant-scoped records.
         try:
-            # Start with cache
-            results = await self._get_from_cache(filters)
+            entries = self._fetch_scoped(filters)
+            results = [e for e in entries if self._matches_filter(e, filters)]
+            results = self._sort_results(results, filters.sort_by, filters.sort_order)
+            return results[filters.offset : filters.offset + filters.limit]
+        except Exception as e:
+            logger.warning(f"Database audit query failed ({e}); using files")
 
-            # If we need more results, check files
+        # Fallback: process-local cache + JSONL files.
+        try:
+            results = await self._get_from_cache(filters)
             if len(results) < filters.limit:
                 file_results = await self._get_from_files(filters)
-                # Combine and deduplicate
-                all_results = results + file_results
-                # Remove duplicates (keep first occurrence)
                 seen = {e.audit_id for e in results}
-                unique_results = [e for e in all_results if e.audit_id not in seen]
-                results = unique_results
+                results = results + [e for e in file_results if e.audit_id not in seen]
 
-            # Apply sorting
             results = self._sort_results(results, filters.sort_by, filters.sort_order)
-
-            # Apply pagination
             start = filters.offset
-            end = start + filters.limit
-            results = results[start:end]
-
-            return results
+            return results[start : start + filters.limit]
 
         except Exception as e:
             logger.error(f"❌ Query failed: {e}")
             return []
 
-    async def query_session(self, session_id: str, limit: int = 100) -> List[AuditEntry]:
+    def _fetch_scoped(self, filters: AuditFilter) -> List[AuditEntry]:
+        """Load audit entries from the system of record for the filter's scope."""
+        from db import repositories
+
+        payloads = repositories.fetch_audit_payloads(
+            project_id=filters.tenant_id,
+            workspace_id=filters.workspace_id,
+            session_id=filters.session_id,
+            start_time=filters.start_time,
+            end_time=filters.end_time,
+            limit=100000,
+        )
+
+        entries: List[AuditEntry] = []
+        for payload in payloads:
+            try:
+                entries.append(AuditEntry(**payload))
+            except Exception as exc:  # tolerate older/partial records
+                logger.debug(f"Skipping malformed audit record: {exc}")
+        return entries
+
+    async def query_session(
+        self,
+        session_id: str,
+        limit: int = 100,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> List[AuditEntry]:
         """
         Get all audit entries for a session.
 
@@ -170,25 +207,50 @@ class AuditLogger:
         Returns:
             List of audit entries for the session
         """
-        filters = AuditFilter(session_id=session_id, limit=limit, sort_order="asc")
+        filters = AuditFilter(
+            session_id=session_id,
+            limit=limit,
+            sort_order="asc",
+            tenant_id=project_id,
+            workspace_id=workspace_id,
+        )
         return await self.query(filters)
 
-    async def get_recent(self, limit: int = 50) -> List[AuditEntry]:
+    async def get_recent(
+        self,
+        limit: int = 50,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> List[AuditEntry]:
         """
-        Get recent audit entries from cache.
+        Get recent audit entries for a scope, oldest of the window first.
 
         Args:
             limit: Maximum entries to return
+            project_id: Restrict to a project (tenant)
+            workspace_id: Restrict to a workspace
 
         Returns:
             List of recent audit entries
         """
-        async with self._cache_lock:
-            return list(self._cache[-limit:])
+        try:
+            from db import repositories
+
+            payloads = repositories.fetch_audit_payloads(
+                project_id=project_id, workspace_id=workspace_id, limit=limit
+            )
+            entries = [AuditEntry(**payload) for payload in payloads]
+            return list(reversed(entries))
+        except Exception as e:
+            logger.warning(f"Database audit read failed ({e}); using cache")
+            async with self._cache_lock:
+                return list(self._cache[-limit:])
 
     async def export(
         self,
-        export_config: AuditExport
+        export_config: AuditExport,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> Union[str, Dict[str, Any]]:
         """
         Export audit trail for a session.
@@ -201,7 +263,12 @@ class AuditLogger:
         """
         try:
             # Get entries for session
-            filters = AuditFilter(session_id=export_config.session_id, limit=10000)
+            filters = AuditFilter(
+                session_id=export_config.session_id,
+                limit=10000,
+                tenant_id=project_id,
+                workspace_id=workspace_id,
+            )
             entries = await self.query(filters)
 
             # Sanitize if requested
@@ -245,7 +312,9 @@ class AuditLogger:
     async def get_summary(
         self,
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None
+        end_time: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> AuditSummary:
         """
         Generate audit summary for a time period.
@@ -265,10 +334,14 @@ class AuditLogger:
                 end_time = datetime.now().isoformat()
 
             # Query all entries in time range
+            # AuditFilter caps `limit` at 10000; the scoped fetch behind
+            # `query` reads a much larger window, so the summary sees all of it.
             filters = AuditFilter(
                 start_time=start_time,
                 end_time=end_time,
-                limit=100000,  # Large limit for summary
+                limit=10000,
+                tenant_id=project_id,
+                workspace_id=workspace_id,
             )
             entries = await self.query(filters)
 
@@ -707,3 +780,9 @@ def set_audit_logger(logger_instance: AuditLogger) -> None:
     """Set a custom audit logger instance (useful for testing)."""
     global _audit_logger
     _audit_logger = logger_instance
+
+
+def reset_audit_logger() -> None:
+    """Forget the cached audit logger (mainly for testing)."""
+    global _audit_logger
+    _audit_logger = None

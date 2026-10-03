@@ -181,7 +181,10 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Authorization**: role checks (`owner`/`admin`/`member`/`viewer`) via `require_role`
 - **Session Management**: sessions are unique and namespaced per project
 - **Audit Attribution**: actions attributed to a session and user
-- **Remaining gap**: guardrail/approval/audit state is not yet partitioned per project
+- **Durable, tenant-scoped records**: audit entries and approval decisions are
+  persisted per project and survive restarts; reads are always scoped
+- **Remaining gap**: an approval decision must be resolved by the process that
+  is waiting for it (the in-process signal is not yet shared via pub/sub)
 
 #### **API Security**
 - **CORS Configuration**: Controlled cross-origin access
@@ -233,7 +236,7 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 ### Known Gaps
 
-- **Guardrail/approval/audit state is process-local and not yet partitioned per project**
+- **Approval decisions are not yet resolvable across worker processes** (the waiting signal is in-process; the records themselves are durable)
 - **`AUTH_PROVIDER=dev` trusts caller-supplied headers** and must never face an untrusted network
 - **No tamper-evident / hash-chained audit log**
 - **No configurable retention or right-to-erasure tooling**

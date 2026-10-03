@@ -189,6 +189,9 @@ async def chat(
             action_type=ActionType.CHAT,
             action_name="chat_message",
             input_text=request.message,
+            tenant_id=context.project.id if context.project else None,
+            workspace_id=context.workspace.id,
+            user_id=context.user.email if context.user else None,
         )
 
         # Add user message to history
@@ -225,6 +228,9 @@ async def chat(
                     action_type=ActionType.TOOL_CALL,
                     action_name="tool_execution",
                     input_text=request.message,
+                    tenant_id=context.project.id if context.project else None,
+                    workspace_id=context.workspace.id,
+                    user_id=context.user.email if context.user else None,
                     tool_name=tool_call.get('tool_name') if isinstance(tool_call, dict) else getattr(tool_call, 'tool_name', None),
                     tool_arguments=tool_call.get('arguments') if isinstance(tool_call, dict) else getattr(tool_call, 'arguments', None),
                     tool_success=tool_call.get('success', True) if isinstance(tool_call, dict) else getattr(tool_call, 'success', True),

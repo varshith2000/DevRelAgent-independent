@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from auth.deps import get_request_context
+from auth.deps import RequestContext, get_request_context
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from guardrails.approval_guard import get_approval_guard
@@ -181,7 +181,9 @@ async def get_alerts(
 
 
 @router.get("/summary")
-async def get_dashboard_summary():
+async def get_dashboard_summary(
+    context: RequestContext = Depends(get_request_context),
+):
     """
     Get dashboard summary with key metrics.
 
@@ -208,10 +210,11 @@ async def get_dashboard_summary():
     if health_scheduler:
         recent_alerts = health_scheduler.get_alert_history(limit=10)
 
-    # Get pending approvals
+    # Get pending approvals for the caller's project
     pending_approvals = 0
     if approval_guard:
-        pending_approvals = len(approval_guard.list_pending_approvals())
+        project_id = context.project.id if context.project else None
+        pending_approvals = len(approval_guard.list_pending_approvals(project_id=project_id))
 
     return {
         "timestamp": datetime.now().isoformat(),

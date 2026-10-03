@@ -16,7 +16,14 @@ class ApprovalRequest(BaseModel):
     """Request for user approval before executing high-risk actions."""
 
     approval_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    action_type: Literal["github_issue", "github_pr", "browser_action", "write_operation"]
+    action_type: Literal[
+        "github_issue",
+        "github_pr",
+        "browser_action",
+        "write_operation",
+        "delete_operation",
+        "schema_change",
+    ]
     plan: List[str] = Field(description="Step-by-step plan of the action")
     risk_level: Literal["low", "medium", "high", "critical"]
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)

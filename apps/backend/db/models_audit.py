@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -50,6 +50,11 @@ class AuditRecord(Base):
         DateTime(timezone=True), default=utcnow, index=True
     )
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Tamper-evident hash chain, one independent chain per project/workspace.
+    chain_scope: Mapped[str] = mapped_column(String(80), default="global", index=True)
+    sequence: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), default="")
+    entry_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
 
 
 class ApprovalRecord(Base):

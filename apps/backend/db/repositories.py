@@ -10,7 +10,10 @@ is given, only that tenant's rows are returned.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +23,12 @@ from sqlalchemy.orm import Session
 from db.models_audit import ApprovalRecord, AuditRecord
 
 logger = logging.getLogger(__name__)
+
+# Hash of the "no previous entry" state — the first link of every chain.
+GENESIS_HASH = "0" * 64
+
+# Serializes appends within a process so concurrent writers cannot fork a chain.
+_CHAIN_LOCK = threading.Lock()
 
 
 def _new_session() -> Session:
@@ -37,34 +46,134 @@ def _enum_value(value: Any) -> Any:
 # ── Audit records ─────────────────────────────────────────────────────
 
 
+def chain_scope(project_id: Optional[str] = None, workspace_id: Optional[str] = None) -> str:
+    """The independent hash chain an entry belongs to."""
+    if project_id:
+        return f"project:{project_id}"
+    if workspace_id:
+        return f"workspace:{workspace_id}"
+    return "global"
+
+
+def _canonical(body: Dict[str, Any]) -> str:
+    """Deterministic JSON so the hash is stable across processes/databases."""
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def compute_entry_hash(scope: str, sequence: int, prev_hash: str, payload: Dict[str, Any]) -> str:
+    """Hash one entry together with its position and predecessor."""
+    body = {
+        "chain_scope": scope,
+        "sequence": sequence,
+        "prev_hash": prev_hash,
+        "payload": payload,
+    }
+    return hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
+
+
 def record_audit(
     payload: Dict[str, Any],
     workspace_id: Optional[str] = None,
     project_id: Optional[str] = None,
 ) -> None:
-    """Persist one (already sanitized) audit entry."""
+    """Persist one (already sanitized) audit entry and extend the hash chain."""
+    scope = chain_scope(project_id, workspace_id)
+    with _CHAIN_LOCK:
+        session = _new_session()
+        try:
+            last = session.scalars(
+                select(AuditRecord)
+                .where(AuditRecord.chain_scope == scope, AuditRecord.sequence > 0)
+                .order_by(AuditRecord.sequence.desc())
+                .limit(1)
+            ).first()
+            sequence = (last.sequence + 1) if last is not None else 1
+            prev_hash = last.entry_hash if last is not None else GENESIS_HASH
+            entry_hash = compute_entry_hash(scope, sequence, prev_hash, payload)
+
+            session.add(
+                AuditRecord(
+                    id=str(payload.get("audit_id") or ""),
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    session_id=str(payload.get("session_id") or ""),
+                    user_id=payload.get("user_id"),
+                    action_type=str(_enum_value(payload.get("action_type")) or ""),
+                    action_name=payload.get("action_name"),
+                    tool_name=payload.get("tool_name"),
+                    approval_decision=_enum_value(payload.get("approval_decision")),
+                    guardrail_result=_enum_value(payload.get("guardrail_result")),
+                    error_type=payload.get("error_type"),
+                    timestamp=str(payload.get("timestamp") or ""),
+                    payload=payload,
+                    chain_scope=scope,
+                    sequence=sequence,
+                    prev_hash=prev_hash,
+                    entry_hash=entry_hash,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+
+def verify_audit_chain(
+    project_id: Optional[str] = None, workspace_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Recompute a scope's hash chain and report the first break, if any.
+
+    Entries written before the chain existed (``sequence == 0``) are reported
+    as ``legacy`` and excluded from the walk so an unbackfilled database does
+    not read as tampered.
+    """
+    scope = chain_scope(project_id, workspace_id)
     session = _new_session()
     try:
-        session.add(
-            AuditRecord(
-                id=str(payload.get("audit_id") or ""),
-                workspace_id=workspace_id,
-                project_id=project_id,
-                session_id=str(payload.get("session_id") or ""),
-                user_id=payload.get("user_id"),
-                action_type=str(_enum_value(payload.get("action_type")) or ""),
-                action_name=payload.get("action_name"),
-                tool_name=payload.get("tool_name"),
-                approval_decision=_enum_value(payload.get("approval_decision")),
-                guardrail_result=_enum_value(payload.get("guardrail_result")),
-                error_type=payload.get("error_type"),
-                timestamp=str(payload.get("timestamp") or ""),
-                payload=payload,
+        records = session.scalars(
+            select(AuditRecord)
+            .where(AuditRecord.chain_scope == scope)
+            .order_by(AuditRecord.sequence.asc())
+        ).all()
+
+        legacy = sum(1 for record in records if record.sequence == 0)
+        chained = [record for record in records if record.sequence > 0]
+
+        prev_hash = GENESIS_HASH
+        for index, record in enumerate(chained, start=1):
+            if record.sequence != index:
+                return _broken(scope, index, record.id, "sequence gap", legacy)
+            if record.prev_hash != prev_hash:
+                return _broken(scope, index, record.id, "broken link", legacy)
+            recomputed = compute_entry_hash(
+                scope, record.sequence, record.prev_hash, record.payload
             )
-        )
-        session.commit()
+            if recomputed != record.entry_hash:
+                return _broken(scope, index, record.id, "hash mismatch", legacy)
+            prev_hash = record.entry_hash
+
+        return {
+            "ok": True,
+            "chain_scope": scope,
+            "checked": len(chained),
+            "legacy": legacy,
+            "head": prev_hash,
+            "broken_at": None,
+            "reason": None,
+        }
     finally:
         session.close()
+
+
+def _broken(scope: str, index: int, record_id: str, reason: str, legacy: int) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "chain_scope": scope,
+        "checked": index,
+        "legacy": legacy,
+        "head": None,
+        "broken_at": record_id,
+        "reason": reason,
+    }
 
 
 def fetch_audit_payloads(

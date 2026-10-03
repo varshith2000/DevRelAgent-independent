@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config.settings import get_settings
 from db.session import init_db
 from guardrails.approval_guard import get_approval_guard
+from limits.http_limiter import HttpRateLimitMiddleware
 from observability.logging import configure_logging
 from routes.approvals import router as approvals_router
 from routes.audit import router as audit_router
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
     # Register KeDB tools
     try:
         from tools.kedb_tool import get_kedb_tool
+
         kedb_tool = get_kedb_tool()
         logger.info("[OK] KeDB tools registered")
     except Exception as e:
@@ -80,9 +82,7 @@ async def lifespan(app: FastAPI):
         # Manual registration for ClickHouse tool
         registry.register_manual(
             name="clickhouse_query",
-            handler=lambda natural_query: ch_tool.format_result(
-                ch_tool.query_nl(natural_query)
-            ),
+            handler=lambda natural_query: ch_tool.format_result(ch_tool.query_nl(natural_query)),
             description="Query ClickHouse database with natural language",
             parameters={
                 "natural_query": {
@@ -100,6 +100,7 @@ async def lifespan(app: FastAPI):
     # Register browser tool
     try:
         from tools.browser_tool import browser_action
+
         registry.register_manual(
             name="browser_action",
             handler=browser_action,
@@ -113,6 +114,7 @@ async def lifespan(app: FastAPI):
     # Import Grafana tools (auto-registered via @tool decorator)
     try:
         from tools import grafana_tool
+
         logger.info("[OK] Grafana tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Grafana tools not available: {e}")
@@ -120,6 +122,7 @@ async def lifespan(app: FastAPI):
     # Import observability tools (auto-registered via @tool decorator)
     try:
         from tools import observability_tool
+
         logger.info("[OK] Observability tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Observability tools not available: {e}")
@@ -127,6 +130,7 @@ async def lifespan(app: FastAPI):
     # Import gap detection tools (auto-registered via @tool decorator)
     try:
         from tools import gap_detection_tool
+
         logger.info("[OK] Gap detection tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Gap detection tools not available: {e}")
@@ -134,6 +138,7 @@ async def lifespan(app: FastAPI):
     # Import automation tools (auto-registered via @tool decorator)
     try:
         from tools import automation_tool
+
         logger.info("[OK] Automation tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Automation tools not available: {e}")
@@ -141,6 +146,7 @@ async def lifespan(app: FastAPI):
     # Import dashboard tools (auto-registered via @tool decorator)
     try:
         from tools import dashboard_tool
+
         logger.info("[OK] Dashboard tools registered")
     except Exception as e:
         logger.warning(f"⚠️ Dashboard tools not available: {e}")
@@ -197,7 +203,7 @@ async def lifespan(app: FastAPI):
                 clickhouse_client=ch_client,
                 tool_registry=registry,
                 interval_minutes=settings.health_check_interval_minutes,
-                error_threshold=settings.error_spike_threshold
+                error_threshold=settings.error_spike_threshold,
             )
 
             # Connect SSE queue for alerts
@@ -237,8 +243,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",    # Next.js
-        "http://localhost:5173",    # Vite
+        "http://localhost:3000",  # Next.js
+        "http://localhost:5173",  # Vite
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ],
@@ -246,6 +252,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Edge rate limiting — shared, per-project/identity budget in front of every
+# endpoint (see limits/http_limiter.py).
+app.add_middleware(HttpRateLimitMiddleware)
 
 
 # ─── Health ──────────────────────────────────────────

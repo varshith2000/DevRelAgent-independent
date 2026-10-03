@@ -266,13 +266,19 @@ confined to it.
   a single process, `redis` for multiple replicas).
 - **Audit trail and approvals** are persisted in the system of record and scoped
   to a project, so history survives restarts and never leaks across tenants.
+  Audit entries are additionally hash-chained per project, so any edit,
+  deletion or reordering of a stored entry is detectable via
+  `GET /audit/verify`.
 - **Guardrail and limit state** (rate-limit windows, token budgets, circuit
   breakers) lives in a shared state backend (`SESSION_BACKEND=redis`) and is
   scoped per project, so every replica enforces the same limits.
+- **Edge rate limiting** puts a coarse, per-project/identity request budget in
+  front of every endpoint, shared across replicas, returning `429` with a
+  `Retry-After` header when exceeded.
 
 Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/members`,
-`GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`, and
-`GET/POST/DELETE /projects/{id}/api-keys`.
+`GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`,
+`GET/POST/DELETE /projects/{id}/api-keys`, and `GET /audit/verify`.
 
 ### Deployment Considerations
 
@@ -283,6 +289,10 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
 - **Shared limits (Phase 3)**: rate-limit windows, token budgets and circuit
   breakers are shared across replicas and scoped per project, so limits hold
   under horizontal scaling instead of being enforced independently per process.
+- **Edge limiting + tamper-evident audit (Phase 4)**: every request passes a
+  shared, per-project request budget, and audit entries are hash-chained per
+  project so tampering is detectable. Note: the chain guards *stored* entries
+  after the fact; it is not yet anchored to an external notary/witness.
 - **Not certified**: DevRelAgent holds no security certification and makes no
   compliance guarantee. It implements some controls that *support* compliance
   work (PII redaction, audit logging, approval gates); certification would

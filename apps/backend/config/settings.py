@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     # How long an approval request waits for a decision before auto-rejecting.
     approval_timeout_seconds: int = 300
 
+    # ── HTTP edge rate limiting (Phase 4) ─────────────────────────────────
+    # A coarse per-client limit in front of every endpoint, enforced through
+    # the shared state backend so all replicas share one budget. Scoped by
+    # project header when present, falling back to the caller's identity/IP.
+    http_rate_limit_enabled: bool = True
+    http_rate_limit_requests: int = 600
+    http_rate_limit_window_seconds: int = 60
+    http_rate_limit_exempt_paths: str = "/health,/metrics,/docs,/redoc,/openapi.json,/favicon.ico"
+
     # ── Health check scheduler ────────────────────────────────────────────
     health_check_enabled: bool = False
     health_check_interval_minutes: int = 5
@@ -182,6 +191,13 @@ class Settings(BaseSettings):
     def allowed_urls_list(self) -> List[str]:
         """Allowed browser URLs as a cleaned list."""
         return [url.strip() for url in self.allowed_urls.split(",") if url.strip()]
+
+    @property
+    def http_rate_limit_exempt_list(self) -> List[str]:
+        """Paths exempt from the HTTP edge limiter as a cleaned list."""
+        return [
+            path.strip() for path in self.http_rate_limit_exempt_paths.split(",") if path.strip()
+        ]
 
     @property
     def resolved_ollama_embed_url(self) -> str:

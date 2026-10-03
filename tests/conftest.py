@@ -92,15 +92,20 @@ def db_engine(tmp_path, monkeypatch):
 
     from auth.provider import reset_auth_provider
     from sessions.store import MemorySessionStore, reset_session_store
+    from shared.state import MemorySharedState, reset_shared_state
 
     reset_engine(engine)
     reset_auth_provider()
     reset_session_store(MemorySessionStore())
+    # Fresh shared state per test: HTTP edge limits and guardrail counters must
+    # never accumulate across tests.
+    reset_shared_state(MemorySharedState())
     yield engine
 
     reset_engine(None)
     reset_auth_provider()
     reset_session_store(None)
+    reset_shared_state(None)
     engine.dispose()
 
 

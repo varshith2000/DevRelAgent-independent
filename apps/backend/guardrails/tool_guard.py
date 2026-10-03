@@ -15,13 +15,13 @@ Usage:
     from guardrails.tool_guard import ToolGuardrail, get_tool_guardrail
 
     guard = get_tool_guardrail()
-    
+
     # Rate-limited execution
     result = await guard.execute_with_rate_limit(tool_name, handler, arguments)
-    
+
     # Timeout-wrapped execution
     result = await guard.execute_with_timeout(tool_name, handler, arguments, timeout=30)
-    
+
     # Scope-restricted execution
     result = await guard.execute_with_scope_check(tool_name, handler, arguments, scope)
 """
@@ -37,11 +37,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
+from shared.state import SharedState, get_shared_state, scoped_key
+
 logger = logging.getLogger(__name__)
 
 
 class ToolCategory(Enum):
     """Tool categories for scope restriction."""
+
     DATABASE_QUERY = "database_query"
     DATABASE_WRITE = "database_write"
     CODE_READ = "code_read"
@@ -60,6 +63,7 @@ class ToolCategory(Enum):
 @dataclass
 class ToolExecutionResult:
     """Result of tool execution with guardrails."""
+
     success: bool
     result: Any = None
     error: Optional[str] = None
@@ -88,6 +92,7 @@ class ToolExecutionResult:
 @dataclass
 class RateLimitConfig:
     """Configuration for rate limiting."""
+
     requests_per_second: float = 10.0
     requests_per_minute: int = 100
     requests_per_hour: int = 1000
@@ -97,6 +102,7 @@ class RateLimitConfig:
 @dataclass
 class TimeoutConfig:
     """Configuration for timeout wrapper."""
+
     default_timeout_seconds: float = 30.0
     max_timeout_seconds: float = 120.0
     min_timeout_seconds: float = 1.0
@@ -106,6 +112,7 @@ class TimeoutConfig:
 @dataclass
 class ScopeConfig:
     """Configuration for scope restriction."""
+
     allowed_categories: Set[ToolCategory] = field(default_factory=set)
     allowed_urls: Set[str] = field(default_factory=set)
     allowed_paths: Set[str] = field(default_factory=set)
@@ -116,6 +123,7 @@ class ScopeConfig:
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for circuit breaker."""
+
     failure_threshold: int = 5
     success_threshold: int = 3
     timeout_seconds: float = 60.0
@@ -129,22 +137,20 @@ class RateLimiter:
     Implements sliding window rate limiting with burst support.
     """
 
-    def __init__(self, config: Optional[RateLimitConfig] = None):
+    def __init__(
+        self,
+        config: Optional[RateLimitConfig] = None,
+        state: Optional[SharedState] = None,
+    ):
         """
         Initialize rate limiter.
 
         Args:
             config: Rate limit configuration
+            state: Shared state backend (defaults to the configured one)
         """
         self.config = config or RateLimitConfig()
-
-        # Token buckets per key (tool or user)
-        self._buckets: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
-            "tokens": self.config.burst_size,
-            "last_update": time.time(),
-            "minute_requests": [],
-            "hour_requests": [],
-        })
+        self._state = state
 
         # Statistics
         self.stats = {
@@ -153,78 +159,85 @@ class RateLimiter:
             "tokens_consumed": 0,
         }
 
-    def _refill_tokens(self, key: str):
-        """Refill tokens based on elapsed time."""
-        bucket = self._buckets[key]
+    @property
+    def _store(self) -> SharedState:
+        return self._state or get_shared_state()
+
+    def _bucket_key(self, scope: str) -> str:
+        return scoped_key("toolguard", scope, "bucket")
+
+    def _minute_key(self, scope: str) -> str:
+        return scoped_key("toolguard", scope, "minute")
+
+    def _hour_key(self, scope: str) -> str:
+        return scoped_key("toolguard", scope, "hour")
+
+    def _load_bucket(self, scope: str) -> Dict[str, Any]:
+        """Read the shared token bucket, refilling it for elapsed time."""
         now = time.time()
-        elapsed = now - bucket["last_update"]
-
-        # Add tokens based on elapsed time
-        tokens_to_add = elapsed * self.config.requests_per_second
-        bucket["tokens"] = min(
-            bucket["tokens"] + tokens_to_add,
-            self.config.burst_size
+        bucket = self._store.get_json(self._bucket_key(scope)) or {}
+        tokens = float(bucket.get("tokens", self.config.burst_size))
+        last_update = float(bucket.get("last_update", now))
+        tokens = min(
+            tokens + max(0.0, now - last_update) * self.config.requests_per_second,
+            self.config.burst_size,
         )
-        bucket["last_update"] = now
+        return {"tokens": tokens, "last_update": now}
 
-        # Clean old requests
-        minute_ago = now - 60
-        hour_ago = now - 3600
+    def _save_bucket(self, scope: str, bucket: Dict[str, Any]) -> None:
+        self._store.set_json(self._bucket_key(scope), bucket, 3600)
 
-        bucket["minute_requests"] = [
-            t for t in bucket["minute_requests"] if t > minute_ago
-        ]
-        bucket["hour_requests"] = [
-            t for t in bucket["hour_requests"] if t > hour_ago
-        ]
-
-    async def acquire(self, key: str = "default") -> bool:
+    async def acquire(self, key: str = "default", project_id: Optional[str] = None) -> bool:
         """
         Try to acquire a rate limit token.
 
         Args:
             key: Rate limit key (tool name, user ID, etc.)
+            project_id: Tenant scope; each project has its own budget
 
         Returns:
             True if token acquired, False if rate limited
         """
         self.stats["total_requests"] += 1
-
-        bucket = self._buckets[key]
-        self._refill_tokens(key)
-
-        now = time.time()
+        scope = scoped_key(project_id, key)
+        bucket = self._load_bucket(scope)
 
         # Check per-second rate (token bucket)
         if bucket["tokens"] < 1:
             self.stats["rate_limited"] += 1
             return False
 
-        # Check per-minute rate
-        if len(bucket["minute_requests"]) >= self.config.requests_per_minute:
+        # Check per-minute and per-hour sliding windows
+        if self._store.count(self._minute_key(scope), 60) >= self.config.requests_per_minute:
             self.stats["rate_limited"] += 1
             return False
 
-        # Check per-hour rate
-        if len(bucket["hour_requests"]) >= self.config.requests_per_hour:
+        if self._store.count(self._hour_key(scope), 3600) >= self.config.requests_per_hour:
             self.stats["rate_limited"] += 1
             return False
 
         # Consume token
         bucket["tokens"] -= 1
-        bucket["minute_requests"].append(now)
-        bucket["hour_requests"].append(now)
+        self._save_bucket(scope, bucket)
+        self._store.record(self._minute_key(scope), 60)
+        self._store.record(self._hour_key(scope), 3600)
         self.stats["tokens_consumed"] += 1
 
         return True
 
-    async def wait_for_token(self, key: str = "default", timeout: float = 10.0) -> bool:
+    async def wait_for_token(
+        self,
+        key: str = "default",
+        timeout: float = 10.0,
+        project_id: Optional[str] = None,
+    ) -> bool:
         """
         Wait for a rate limit token.
 
         Args:
             key: Rate limit key
             timeout: Maximum time to wait
+            project_id: Tenant scope
 
         Returns:
             True if token acquired, False if timeout
@@ -232,24 +245,24 @@ class RateLimiter:
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            if await self.acquire(key):
+            if await self.acquire(key, project_id=project_id):
                 return True
             await asyncio.sleep(0.1)  # Wait 100ms before retry
 
         return False
 
-    def get_wait_time(self, key: str = "default") -> float:
+    def get_wait_time(self, key: str = "default", project_id: Optional[str] = None) -> float:
         """
         Get estimated wait time for token.
 
         Args:
             key: Rate limit key
+            project_id: Tenant scope
 
         Returns:
             Estimated wait time in seconds
         """
-        bucket = self._buckets[key]
-        self._refill_tokens(key)
+        bucket = self._load_bucket(scoped_key(project_id, key))
 
         if bucket["tokens"] >= 1:
             return 0.0
@@ -257,13 +270,15 @@ class RateLimiter:
         tokens_needed = 1 - bucket["tokens"]
         return tokens_needed / self.config.requests_per_second
 
-    def reset(self, key: Optional[str] = None):
-        """Reset rate limit state."""
-        if key:
-            if key in self._buckets:
-                del self._buckets[key]
-        else:
-            self._buckets.clear()
+    def reset(self, key: Optional[str] = None, project_id: Optional[str] = None):
+        """Reset shared rate limit state for a scope."""
+        if not key:
+            logger.warning("RateLimiter.reset() needs a key when using shared state")
+            return
+        scope = scoped_key(project_id, key)
+        self._store.delete(self._bucket_key(scope))
+        self._store.delete(self._minute_key(scope))
+        self._store.delete(self._hour_key(scope))
 
 
 class TimeoutWrapper:
@@ -315,8 +330,9 @@ class TimeoutWrapper:
         retries = retry_count or self.config.timeout_retry_count
 
         # Clamp timeout to valid range
-        timeout = max(self.config.min_timeout_seconds,
-                     min(timeout, self.config.max_timeout_seconds))
+        timeout = max(
+            self.config.min_timeout_seconds, min(timeout, self.config.max_timeout_seconds)
+        )
 
         attempt = 0
         last_error: Optional[str] = None
@@ -332,10 +348,7 @@ class TimeoutWrapper:
 
             try:
                 # Execute with timeout
-                result = await asyncio.wait_for(
-                    handler(*args, **kwargs),
-                    timeout=timeout
-                )
+                result = await asyncio.wait_for(handler(*args, **kwargs), timeout=timeout)
 
                 execution_time_ms = (time.time() - start_time) * 1000
                 self.stats["total_execution_time_ms"] += execution_time_ms
@@ -464,10 +477,7 @@ class ScopeEnforcer:
             return True  # No restrictions
 
         url_lower = url.lower()
-        return any(
-            allowed.lower() in url_lower
-            for allowed in self.config.allowed_urls
-        )
+        return any(allowed.lower() in url_lower for allowed in self.config.allowed_urls)
 
     def _is_path_allowed(self, path: str) -> bool:
         """Check if file path is allowed."""
@@ -478,10 +488,7 @@ class ScopeEnforcer:
         if ".." in path or path.startswith("/etc") or path.startswith("/root"):
             return False
 
-        return any(
-            allowed in path
-            for allowed in self.config.allowed_paths
-        )
+        return any(allowed in path for allowed in self.config.allowed_paths)
 
     def validate_result_size(self, result: Any) -> Tuple[bool, Optional[str]]:
         """
@@ -494,7 +501,7 @@ class ScopeEnforcer:
             Tuple of (is_valid, violation_reason)
         """
         try:
-            result_bytes = len(str(result).encode('utf-8'))
+            result_bytes = len(str(result).encode("utf-8"))
             if result_bytes > self.config.max_result_size_bytes:
                 return False, f"Result size ({result_bytes} bytes) exceeds limit"
             return True, None
@@ -514,23 +521,20 @@ class CircuitBreaker:
         OPEN = "open"  # Blocking calls
         HALF_OPEN = "half_open"  # Testing recovery
 
-    def __init__(self, config: Optional[CircuitBreakerConfig] = None):
+    def __init__(
+        self,
+        config: Optional[CircuitBreakerConfig] = None,
+        state: Optional[SharedState] = None,
+    ):
         """
         Initialize circuit breaker.
 
         Args:
             config: Circuit breaker configuration
+            state: Shared state backend (defaults to the configured one)
         """
         self.config = config or CircuitBreakerConfig()
-
-        # Per-tool state
-        self._states: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
-            "state": self.State.CLOSED,
-            "failure_count": 0,
-            "success_count": 0,
-            "last_failure_time": None,
-            "half_open_calls": 0,
-        })
+        self._state_store = state
 
         # Statistics
         self.stats = {
@@ -540,70 +544,106 @@ class CircuitBreaker:
             "successful_recoveries": 0,
         }
 
-    def call_success(self, tool_name: str):
+    @property
+    def _store(self) -> SharedState:
+        return self._state_store or get_shared_state()
+
+    def _key(self, tool_name: str, project_id: Optional[str]) -> str:
+        return scoped_key("toolguard", project_id, tool_name, "circuit")
+
+    def _blank(self) -> Dict[str, Any]:
+        return {
+            "state": self.State.CLOSED.value,
+            "failure_count": 0,
+            "success_count": 0,
+            "last_failure_time": None,
+            "half_open_calls": 0,
+        }
+
+    def _load(self, tool_name: str, project_id: Optional[str]) -> Dict[str, Any]:
+        """Read shared breaker state (creating a closed one if absent)."""
+        state = self._blank()
+        raw = self._store.get_json(self._key(tool_name, project_id))
+        if raw:
+            state.update(raw)
+        return state
+
+    def _save(self, tool_name: str, project_id: Optional[str], state: Dict[str, Any]) -> None:
+        self._store.set_json(self._key(tool_name, project_id), state, 3600)
+
+    def call_success(self, tool_name: str, project_id: Optional[str] = None):
         """Record successful call."""
-        state = self._states[tool_name]
+        state = self._load(tool_name, project_id)
         state["failure_count"] = 0
         state["success_count"] += 1
+        current = self.State(state["state"])
 
-        if state["state"] == self.State.HALF_OPEN:
+        if current == self.State.HALF_OPEN:
             state["half_open_calls"] += 1
 
             # Check if we should close the circuit
             if state["success_count"] >= self.config.success_threshold:
-                state["state"] = self.State.CLOSED
+                state["state"] = self.State.CLOSED.value
                 state["success_count"] = 0
                 self.stats["successful_recoveries"] += 1
                 logger.info(f"Circuit breaker CLOSED for {tool_name}")
 
-        elif state["state"] == self.State.CLOSED:
+        elif current == self.State.CLOSED:
             # Reset failure count on success
             state["failure_count"] = max(0, state["failure_count"] - 1)
 
-    def call_failure(self, tool_name: str):
+        self._save(tool_name, project_id, state)
+
+    def call_failure(self, tool_name: str, project_id: Optional[str] = None):
         """Record failed call."""
-        state = self._states[tool_name]
+        state = self._load(tool_name, project_id)
         state["failure_count"] += 1
         state["last_failure_time"] = time.time()
+        current = self.State(state["state"])
 
-        if state["state"] == self.State.HALF_OPEN:
+        if current == self.State.HALF_OPEN:
             # Immediately open on failure in half-open state
-            state["state"] = self.State.OPEN
+            state["state"] = self.State.OPEN.value
             state["half_open_calls"] = 0
             self.stats["circuit_opens"] += 1
             logger.warning(f"Circuit breaker OPEN for {tool_name} (failure in half-open)")
 
-        elif state["state"] == self.State.CLOSED:
+        elif current == self.State.CLOSED:
             # Check if we should open the circuit
             if state["failure_count"] >= self.config.failure_threshold:
-                state["state"] = self.State.OPEN
+                state["state"] = self.State.OPEN.value
                 self.stats["circuit_opens"] += 1
                 logger.warning(f"Circuit breaker OPEN for {tool_name} (threshold reached)")
 
-    def can_execute(self, tool_name: str) -> Tuple[bool, str]:
+        self._save(tool_name, project_id, state)
+
+    def can_execute(self, tool_name: str, project_id: Optional[str] = None) -> Tuple[bool, str]:
         """
         Check if tool can execute.
 
         Args:
             tool_name: Name of tool
+            project_id: Tenant scope
 
         Returns:
             Tuple of (can_execute, reason)
         """
         self.stats["total_calls"] += 1
-        state = self._states[tool_name]
+        state = self._load(tool_name, project_id)
+        current = self.State(state["state"])
 
-        if state["state"] == self.State.CLOSED:
+        if current == self.State.CLOSED:
             return True, "circuit_closed"
 
-        elif state["state"] == self.State.OPEN:
+        elif current == self.State.OPEN:
             # Check if timeout has elapsed
             if state["last_failure_time"]:
                 elapsed = time.time() - state["last_failure_time"]
                 if elapsed >= self.config.timeout_seconds:
                     # Transition to half-open
-                    state["state"] = self.State.HALF_OPEN
+                    state["state"] = self.State.HALF_OPEN.value
                     state["half_open_calls"] = 0
+                    self._save(tool_name, project_id, state)
                     return True, "circuit_half_open"
 
             self.stats["rejected_calls"] += 1
@@ -617,22 +657,16 @@ class CircuitBreaker:
                 self.stats["rejected_calls"] += 1
                 return False, "circuit_half_open_limit"
 
-    def get_state(self, tool_name: str) -> State:
+    def get_state(self, tool_name: str, project_id: Optional[str] = None) -> State:
         """Get current state for tool."""
-        return self._states[tool_name]["state"]
+        return self.State(self._load(tool_name, project_id)["state"])
 
-    def reset(self, tool_name: Optional[str] = None):
-        """Reset circuit breaker state."""
+    def reset(self, tool_name: Optional[str] = None, project_id: Optional[str] = None):
+        """Reset circuit breaker state for a tool."""
         if tool_name:
-            self._states[tool_name] = {
-                "state": self.State.CLOSED,
-                "failure_count": 0,
-                "success_count": 0,
-                "last_failure_time": None,
-                "half_open_calls": 0,
-            }
+            self._save(tool_name, project_id, self._blank())
         else:
-            self._states.clear()
+            logger.warning("CircuitBreaker.reset() needs a tool name with shared state")
 
 
 class ToolGuardrail:
@@ -641,7 +675,7 @@ class ToolGuardrail:
 
     Usage:
         guard = ToolGuardrail()
-        
+
         # Execute with all protections
         result = await guard.execute(
             tool_name="clickhouse_query",
@@ -707,6 +741,7 @@ class ToolGuardrail:
         category: Optional[ToolCategory] = None,
         timeout_seconds: Optional[float] = None,
         user_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> ToolExecutionResult:
         """
         Execute tool with all guardrails.
@@ -718,6 +753,7 @@ class ToolGuardrail:
             category: Tool category
             timeout_seconds: Override timeout
             user_id: User ID for rate limiting
+            project_id: Tenant scope; limits and breakers are per project
 
         Returns:
             ToolExecutionResult with outcome
@@ -729,7 +765,7 @@ class ToolGuardrail:
 
         # 1. Circuit breaker check
         if self.enable_circuit_breaker:
-            can_exec, cb_reason = self.circuit_breaker.can_execute(tool_name)
+            can_exec, cb_reason = self.circuit_breaker.can_execute(tool_name, project_id=project_id)
             if not can_exec:
                 self.stats["circuit_breaker_rejected"] += 1
                 result = ToolExecutionResult(
@@ -742,9 +778,9 @@ class ToolGuardrail:
 
         # 2. Rate limit check
         if self.enable_rate_limit:
-            if not await self.rate_limiter.acquire(rate_limit_key):
+            if not await self.rate_limiter.acquire(rate_limit_key, project_id=project_id):
                 self.stats["rate_limited"] += 1
-                wait_time = self.rate_limiter.get_wait_time(rate_limit_key)
+                wait_time = self.rate_limiter.get_wait_time(rate_limit_key, project_id=project_id)
                 result = ToolExecutionResult(
                     success=False,
                     error=f"Rate limited. Try again in {wait_time:.1f}s",
@@ -755,9 +791,7 @@ class ToolGuardrail:
 
         # 3. Scope check
         if self.enable_scope_check:
-            is_valid, violation = self.scope_enforcer.validate(
-                tool_name, arguments, category
-            )
+            is_valid, violation = self.scope_enforcer.validate(tool_name, arguments, category)
             if not is_valid:
                 self.stats["scope_violation"] += 1
                 result = ToolExecutionResult(
@@ -797,9 +831,9 @@ class ToolGuardrail:
         # 5. Update circuit breaker
         if self.enable_circuit_breaker:
             if result.success:
-                self.circuit_breaker.call_success(tool_name)
+                self.circuit_breaker.call_success(tool_name, project_id=project_id)
             else:
-                self.circuit_breaker.call_failure(tool_name)
+                self.circuit_breaker.call_failure(tool_name, project_id=project_id)
 
         # Update stats
         if result.success:
@@ -819,7 +853,9 @@ class ToolGuardrail:
         entry = {
             "timestamp": datetime.now().isoformat(),
             "tool_name": tool_name,
-            "arguments": {k: v if len(str(v)) < 100 else f"{str(v)[:100]}..." for k, v in arguments.items()},
+            "arguments": {
+                k: v if len(str(v)) < 100 else f"{str(v)[:100]}..." for k, v in arguments.items()
+            },
             "success": result.success,
             "error": result.error,
             "execution_time_ms": result.execution_time_ms,
@@ -935,6 +971,7 @@ def with_tool_guardrail(
         async def clickhouse_handler(arguments):
             ...
     """
+
     def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
@@ -972,21 +1009,25 @@ def with_tool_guardrail(
             return result.result
 
         return wrapper
+
     return decorator
 
 
 class ToolExecutionError(Exception):
     """Exception for tool execution failures."""
+
     pass
 
 
 class RateLimitExceeded(ToolExecutionError):
     """Exception for rate limit exceeded."""
+
     pass
 
 
 class ScopeViolation(ToolExecutionError):
     """Exception for scope violation."""
+
     pass
 
 

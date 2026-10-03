@@ -22,12 +22,15 @@ from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.state import SharedState, get_shared_state, scoped_key
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class RateLimitRule:
     """Rate limiting rule definition."""
+
     name: str
     max_requests: int
     window_seconds: int
@@ -38,6 +41,7 @@ class RateLimitRule:
 @dataclass
 class RateLimitResult:
     """Result of a rate limit check."""
+
     allowed: bool
     rule_name: str
     remaining: int
@@ -49,6 +53,7 @@ class RateLimitResult:
 @dataclass
 class RateLimitStats:
     """Statistics for rate limiting."""
+
     total_checks: int = 0
     blocked_requests: int = 0
     allowed_requests: int = 0
@@ -85,7 +90,7 @@ class TokenCounter:
         base_count = len(text) / 4
 
         # Adjust for code (more tokens due to density)
-        code_indicators = ['def ', 'function', 'class ', 'import ', '=>', '{', '}', '(', ')', ';']
+        code_indicators = ["def ", "function", "class ", "import ", "=>", "{", "}", "(", ")", ";"]
         code_multiplier = 1.0
         for indicator in code_indicators:
             if indicator in text:
@@ -112,7 +117,7 @@ class TokenCounter:
         total = 0
         for msg in messages:
             if isinstance(msg, dict):
-                content = msg.get('content', '')
+                content = msg.get("content", "")
             else:
                 content = str(msg)
             total += TokenCounter.count_tokens(content)
@@ -120,82 +125,74 @@ class TokenCounter:
 
 
 class SlidingWindowRateLimiter:
+    """Sliding-window rate limiter backed by shared state.
+
+    Events are recorded in a shared, tenant-namespaced window, so every replica
+    enforces the same limit and a restart does not forget it. The backend is
+    chosen by :func:`shared.state.get_shared_state`.
     """
-    Sliding window rate limiter.
 
-    Uses a deque to track request timestamps within the sliding window.
-    Provides accurate rate limiting with O(1) operations.
-    """
-
-    def __init__(self, rule: RateLimitRule):
-        """
-        Initialize sliding window rate limiter.
-
-        Args:
-            rule: Rate limit rule to enforce
-        """
+    def __init__(self, rule: RateLimitRule, state: Optional[SharedState] = None):
         self.rule = rule
-        self.requests: deque = deque()
-        self.lock = asyncio.Lock()
+        self._state = state
 
-    async def check(self, user_id: str, token_count: int = 1) -> RateLimitResult:
+    @property
+    def state(self) -> SharedState:
+        return self._state or get_shared_state()
+
+    def _requests_key(self, scope: str) -> str:
+        return scoped_key("ratelimit", scope, self.rule.name, "requests")
+
+    def _tokens_key(self, scope: str) -> str:
+        return scoped_key("ratelimit", scope, self.rule.name, "tokens")
+
+    async def check(self, scope: str, token_count: int = 1) -> RateLimitResult:
         """
-        Check if request is allowed under rate limit.
+        Check whether a request is allowed, recording it when it is.
 
         Args:
-            user_id: User/session identifier
+            scope: Tenant-scoped identifier (e.g. ``project:user``)
             token_count: Number of tokens in this request
 
         Returns:
             RateLimitResult with decision
         """
-        async with self.lock:
-            now = time.time()
-            window_start = now - self.rule.window_seconds
+        now = time.time()
+        window = self.rule.window_seconds
+        state = self.state
 
-            # Remove requests outside the window
-            while self.requests and self.requests[0] < window_start:
-                self.requests.popleft()
-
-            # Count tokens in current window
-            tokens_in_window = len(self.requests) * token_count
-
-            # Check token limit if defined
-            if self.rule.max_tokens and tokens_in_window + token_count > self.rule.max_tokens:
+        # Token budget is a fixed window counter (approximate but shared).
+        if self.rule.max_tokens and token_count:
+            used = state.incr(self._tokens_key(scope), token_count, window)
+            if used > self.rule.max_tokens:
                 return RateLimitResult(
                     allowed=False,
                     rule_name=self.rule.name,
-                    remaining=max(0, self.rule.max_tokens - tokens_in_window),
-                    reset_at=datetime.fromtimestamp(now + self.rule.window_seconds),
+                    remaining=max(0, self.rule.max_tokens - used),
+                    reset_at=datetime.fromtimestamp(now + window),
                     retry_after=self.rule.block_duration_seconds,
-                    reason=f"Token limit exceeded: {tokens_in_window + token_count}/{self.rule.max_tokens}"
+                    reason=f"Token limit exceeded: {used}/{self.rule.max_tokens}",
                 )
 
-            # Check request count limit
-            if len(self.requests) >= self.rule.max_requests:
-                # Find when the oldest request will expire
-                oldest_request = self.requests[0]
-                retry_after = int(oldest_request + self.rule.window_seconds - now)
-
-                return RateLimitResult(
-                    allowed=False,
-                    rule_name=self.rule.name,
-                    remaining=0,
-                    reset_at=datetime.fromtimestamp(oldest_request + self.rule.window_seconds),
-                    retry_after=retry_after,
-                    reason=f"Rate limit exceeded: {len(self.requests)} requests/{self.rule.max_requests} max"
-                )
-
-            # Request allowed - add to window
-            self.requests.append(now)
-
+        count = state.count(self._requests_key(scope), window)
+        if count >= self.rule.max_requests:
             return RateLimitResult(
-                allowed=True,
+                allowed=False,
                 rule_name=self.rule.name,
-                remaining=self.rule.max_requests - len(self.requests),
-                reset_at=datetime.fromtimestamp(now + self.rule.window_seconds),
-                retry_after=None,
+                remaining=0,
+                reset_at=datetime.fromtimestamp(now + window),
+                retry_after=self.rule.block_duration_seconds,
+                reason=(f"Rate limit exceeded: {count} requests/{self.rule.max_requests} max"),
             )
+
+        recorded = state.record(self._requests_key(scope), window)
+        return RateLimitResult(
+            allowed=True,
+            rule_name=self.rule.name,
+            remaining=max(0, self.rule.max_requests - recorded),
+            reset_at=datetime.fromtimestamp(now + window),
+            retry_after=None,
+        )
 
 
 class RateLimiter:
@@ -257,8 +254,12 @@ class RateLimiter:
         self.enable_redis = enable_redis
         self.redis_url = redis_url
 
-        # In-memory limiters (user_id -> rule_name -> limiter)
-        self.limiters: Dict[str, Dict[str, SlidingWindowRateLimiter]] = {}
+        # One stateless limiter per rule; the window itself lives in shared state.
+        self.limiters: Dict[str, SlidingWindowRateLimiter] = {
+            rule.name: SlidingWindowRateLimiter(rule) for rule in self.rules
+        }
+        # Scopes observed in this process, for lightweight metrics only.
+        self.active_scopes: set = set()
 
         # Statistics
         self.stats = RateLimitStats()
@@ -273,6 +274,7 @@ class RateLimiter:
         user_id: str,
         action: str = "chat",
         token_count: int = 0,
+        project_id: Optional[str] = None,
     ) -> RateLimitResult:
         """
         Check if action is allowed under rate limits.
@@ -281,18 +283,20 @@ class RateLimiter:
             user_id: User/session identifier
             action: Action type (chat, tool_call, approval, etc.)
             token_count: Number of tokens consumed
+            project_id: Tenant scope; limits are enforced per project
 
         Returns:
             RateLimitResult with decision
         """
         self.stats.total_checks += 1
+        scope = scoped_key(project_id, user_id)
 
         # Find applicable rules
         applicable_rules = self._get_applicable_rules(action)
 
         # Check each rule
         for rule in applicable_rules:
-            result = await self._check_rule(user_id, rule, token_count)
+            result = await self._check_rule(scope, rule, token_count)
             if not result.allowed:
                 self.stats.blocked_requests += 1
                 logger.warning(
@@ -346,18 +350,19 @@ class RateLimiter:
         """
         return self.stats
 
-    def reset_user_limits(self, user_id: str) -> None:
+    def reset_user_limits(self, scope: str) -> None:
         """
-        Reset rate limits for a specific user.
-
-        Useful for admin actions or testing.
+        Clear the shared windows for a scope (admin action or testing).
 
         Args:
-            user_id: User ID to reset limits for
+            scope: Tenant-scoped identifier, as passed to the check methods
         """
-        if user_id in self.limiters:
-            del self.limiters[user_id]
-            logger.info(f"Reset rate limits for user={user_id}")
+        state = get_shared_state()
+        for rule in self.rules:
+            state.delete(scoped_key("ratelimit", scope, rule.name, "requests"))
+            state.delete(scoped_key("ratelimit", scope, rule.name, "tokens"))
+        self.active_scopes.discard(scope)
+        logger.info(f"Reset rate limits for scope={scope}")
 
     def _get_applicable_rules(self, action: str) -> List[RateLimitRule]:
         """Get rules applicable to an action type."""
@@ -373,21 +378,19 @@ class RateLimiter:
         return [rule for rule in self.rules if rule.name in rule_names]
 
     async def _check_rule(
-        self,
-        user_id: str,
-        rule: RateLimitRule,
-        token_count: int
+        self, scope: str, rule: RateLimitRule, token_count: int
     ) -> RateLimitResult:
-        """Check a specific rule for a user."""
-        # Get or create limiter for this user and rule
-        if user_id not in self.limiters:
-            self.limiters[user_id] = {}
+        """Check a specific rule for a scope."""
+        limiter = self.limiters.get(rule.name)
+        if limiter is None:
+            limiter = SlidingWindowRateLimiter(rule)
+            self.limiters[rule.name] = limiter
 
-        if rule.name not in self.limiters[user_id]:
-            self.limiters[user_id][rule.name] = SlidingWindowRateLimiter(rule)
+        if len(self.active_scopes) > 10000:
+            self.active_scopes.clear()
+        self.active_scopes.add(scope)
 
-        limiter = self.limiters[user_id][rule.name]
-        result = await limiter.check(user_id, token_count)
+        result = await limiter.check(scope, token_count)
 
         # Update stats
         if result.rule_name not in self.stats.by_rule:
@@ -412,11 +415,12 @@ class RateLimiter:
                 "tokens_consumed": self.stats.tokens_consumed,
                 "block_rate": (
                     self.stats.blocked_requests / self.stats.total_checks
-                    if self.stats.total_checks > 0 else 0
+                    if self.stats.total_checks > 0
+                    else 0
                 ),
                 "by_rule": self.stats.by_rule,
             },
-            "active_users": len(self.limiters),
+            "active_users": len(self.active_scopes),
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -440,6 +444,7 @@ def rate_limit(
         async def chat_endpoint(message: str, session_id: str):
             return response
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -452,7 +457,7 @@ def rate_limit(
                 user_id = kwargs[user_id_param]
             elif len(args) > 0:
                 # Try to get from first argument
-                if hasattr(args[0], 'user_id'):
+                if hasattr(args[0], "user_id"):
                     user_id = args[0].user_id
 
             if not user_id:
@@ -475,6 +480,7 @@ def rate_limit(
 
             if not result.allowed:
                 from fastapi import HTTPException
+
                 raise HTTPException(
                     status_code=429,
                     detail={
@@ -495,6 +501,7 @@ def rate_limit(
             return await func(*args, **kwargs)
 
         return wrapper
+
     return decorator
 
 

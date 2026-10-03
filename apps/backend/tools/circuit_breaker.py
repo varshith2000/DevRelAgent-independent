@@ -21,19 +21,23 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from shared.state import SharedState, get_shared_state, scoped_key
+
 logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
     """Circuit breaker states."""
+
     CLOSED = "closed"  # Normal operation, requests allowed
-    OPEN = "open"        # Failure threshold exceeded, requests blocked
+    OPEN = "open"  # Failure threshold exceeded, requests blocked
     HALF_OPEN = "half_open"  # Testing if service has recovered
 
 
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for a circuit breaker."""
+
     failure_threshold: int = 5  # Failures before opening
     recovery_timeout: int = 60  # Seconds before trying half-open
     success_threshold: int = 2  # Successes in half-open before closing
@@ -45,6 +49,7 @@ class CircuitBreakerConfig:
 @dataclass
 class CircuitBreakerStats:
     """Statistics for circuit breaker monitoring."""
+
     total_calls: int = 0
     successful_calls: int = 0
     failed_calls: int = 0
@@ -70,6 +75,8 @@ class CircuitBreaker:
         self,
         tool_name: str,
         config: Optional[CircuitBreakerConfig] = None,
+        scope: Optional[str] = None,
+        state: Optional[SharedState] = None,
     ):
         """
         Initialize circuit breaker for a tool.
@@ -77,9 +84,13 @@ class CircuitBreaker:
         Args:
             tool_name: Name of the tool this breaker protects
             config: Circuit breaker configuration
+            scope: Tenant scope (project id); breakers are keyed per tenant
+            state: Shared state backend (defaults to the configured one)
         """
         self.tool_name = tool_name
         self.config = config or CircuitBreakerConfig()
+        self.scope = scope
+        self._state_store = state
 
         # State management
         self._state = CircuitState.CLOSED
@@ -97,9 +108,7 @@ class CircuitBreaker:
         self._max_response_times = 100
 
         # Statistics
-        self.stats = CircuitBreakerStats(
-            current_state=CircuitState.CLOSED
-        )
+        self.stats = CircuitBreakerStats(current_state=CircuitState.CLOSED)
 
         logger.info(f"✅ CircuitBreaker initialized for tool: {tool_name}")
 
@@ -108,6 +117,52 @@ class CircuitBreaker:
         """Get current circuit breaker state (thread-safe)."""
         return self._state
 
+    # ── Shared state ──────────────────────────────────────────────────
+
+    def _shared(self) -> SharedState:
+        return self._state_store or get_shared_state()
+
+    def _state_key(self) -> str:
+        return scoped_key("breaker", self.scope, self.tool_name)
+
+    def _persist_ttl(self) -> int:
+        return max(300, self.config.recovery_timeout * 3)
+
+    def _load(self) -> None:
+        """Adopt state written by another replica, if any."""
+        try:
+            snapshot = self._shared().get_json(self._state_key())
+        except Exception as exc:  # backend hiccup must not break execution
+            logger.debug(f"CircuitBreaker: state load failed for {self.tool_name}: {exc}")
+            return
+        if not snapshot:
+            return
+        try:
+            self._state = CircuitState(snapshot["state"])
+            self._failure_count = int(snapshot.get("failure_count", 0))
+            self._success_count = int(snapshot.get("success_count", 0))
+            self._last_failure_time = snapshot.get("last_failure_time")
+            self.stats.current_state = self._state
+        except Exception as exc:
+            logger.debug(f"CircuitBreaker: ignoring bad state snapshot: {exc}")
+
+    def _save(self) -> None:
+        """Publish this breaker's state for other replicas."""
+        try:
+            self._shared().set_json(
+                self._state_key(),
+                {
+                    "state": self._state.value,
+                    "failure_count": self._failure_count,
+                    "success_count": self._success_count,
+                    "last_failure_time": self._last_failure_time,
+                    "updated_at": time.time(),
+                },
+                self._persist_ttl(),
+            )
+        except Exception as exc:
+            logger.debug(f"CircuitBreaker: state save failed for {self.tool_name}: {exc}")
+
     def can_execute(self) -> bool:
         """
         Check if tool execution is allowed.
@@ -115,9 +170,14 @@ class CircuitBreaker:
         Returns:
             True if execution is allowed, False if circuit is open
         """
+        self._load()
+
         # Auto-reset from half-open to closed if recovery timeout passed
         if self._state == CircuitState.HALF_OPEN:
-            if self._last_failure_time and time.time() - self._last_failure_time > self.config.recovery_timeout:
+            if (
+                self._last_failure_time
+                and time.time() - self._last_failure_time > self.config.recovery_timeout
+            ):
                 self._transition_to_closed("Recovery timeout elapsed, resetting to closed")
 
         return self._state != CircuitState.OPEN
@@ -129,14 +189,13 @@ class CircuitBreaker:
         Args:
             error: Optional error message
         """
+        self._load()
         self._failure_count += 1
         self._last_failure_time = time.time()
         self.stats.failed_calls += 1
         self.stats.last_failure_time = datetime.now()
         self.stats.failure_rate = (
-            self.stats.failed_calls / self.stats.total_calls
-            if self.stats.total_calls > 0
-            else 0
+            self.stats.failed_calls / self.stats.total_calls if self.stats.total_calls > 0 else 0
         )
 
         logger.warning(
@@ -148,6 +207,8 @@ class CircuitBreaker:
         if self._failure_count >= self.config.failure_threshold:
             self._transition_to_open(f"Failure threshold reached: {self._failure_count} failures")
 
+        self._save()
+
     def record_success(self, execution_time_ms: Optional[float] = None) -> None:
         """
         Record a tool execution success.
@@ -155,21 +216,20 @@ class CircuitBreaker:
         Args:
             execution_time_ms: Execution time in milliseconds
         """
+        self._load()
         self._success_count += 1
         self._last_success_time = time.time()
         self.stats.successful_calls += 1
         self.stats.last_success_time = datetime.now()
         self.stats.failure_rate = (
-            self.stats.failed_calls / self.stats.total_calls
-            if self.stats.total_calls > 0
-            else 0
+            self.stats.failed_calls / self.stats.total_calls if self.stats.total_calls > 0 else 0
         )
 
         # Track response time
         if execution_time_ms is not None:
             self._response_times.append(execution_time_ms)
             if len(self._response_times) > self._max_response_times:
-                self._response_times = self._response_times[-self._max_response_times:]
+                self._response_times = self._response_times[-self._max_response_times :]
             self.stats.average_response_time_ms = sum(self._response_times) / len(
                 self._response_times
             )
@@ -183,12 +243,9 @@ class CircuitBreaker:
         if self._state == CircuitState.CLOSED:
             self._failure_count = max(0, self._failure_count - 1)
 
-    async def execute_with_protection(
-        self,
-        tool_func: Callable,
-        *args: Any,
-        **kwargs: Any
-    ) -> Any:
+        self._save()
+
+    async def execute_with_protection(self, tool_func: Callable, *args: Any, **kwargs: Any) -> Any:
         """
         Execute tool function with circuit breaker protection.
 
@@ -263,17 +320,20 @@ class CircuitBreaker:
         self._state = CircuitState.OPEN
 
         self.stats.current_state = CircuitState.OPEN
-        self.stats.state_transitions.append({
-            "from": old_state.value,
-            "to": CircuitState.OPEN.value,
-            "reason": reason,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.stats.state_transitions.append(
+            {
+                "from": old_state.value,
+                "to": CircuitState.OPEN.value,
+                "reason": reason,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         logger.error(
             f"CircuitBreaker: {self.tool_name} opened due to: {reason}. "
             f"Tool execution blocked for {self.config.recovery_timeout}s."
         )
+        self._save()
 
     def _transition_to_half_open(self, reason: str) -> None:
         """Transition circuit breaker to half-open state."""
@@ -284,17 +344,20 @@ class CircuitBreaker:
         self._state = CircuitState.HALF_OPEN
 
         self.stats.current_state = CircuitState.HALF_OPEN
-        self.stats.state_transitions.append({
-            "from": old_state.value,
-            "to": CircuitState.HALF_OPEN.value,
-            "reason": reason,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.stats.state_transitions.append(
+            {
+                "from": old_state.value,
+                "to": CircuitState.HALF_OPEN.value,
+                "reason": reason,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         logger.info(
             f"CircuitBreaker: {self.tool_name} transitioned to HALF_OPEN due to: {reason}. "
             f"Testing with max {self.config.half_open_max_calls} calls."
         )
+        self._save()
 
     def _transition_to_closed(self, reason: str) -> None:
         """Transition circuit breaker to closed state."""
@@ -309,17 +372,20 @@ class CircuitBreaker:
         self._success_count = 0
 
         self.stats.current_state = CircuitState.CLOSED
-        self.stats.state_transitions.append({
-            "from": old_state.value,
-            "to": CircuitState.CLOSED.value,
-            "reason": reason,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.stats.state_transitions.append(
+            {
+                "from": old_state.value,
+                "to": CircuitState.CLOSED.value,
+                "reason": reason,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         logger.info(
             f"CircuitBreaker: {self.tool_name} transitioned to CLOSED due to: {reason}. "
             f"Tool execution resumed."
         )
+        self._save()
 
     def reset(self) -> None:
         """Manually reset circuit breaker to closed state."""
@@ -348,9 +414,17 @@ class CircuitBreaker:
                 "timeout_calls": self.stats.timeout_calls,
                 "failure_rate": self.stats.failure_rate,
                 "average_response_time_ms": self.stats.average_response_time_ms,
-                "last_failure_time": self.stats.last_failure_time.isoformat() if self.stats.last_failure_time else None,
-                "last_success_time": self.stats.last_success_time.isoformat() if self.stats.last_success_time else None,
-            }
+                "last_failure_time": (
+                    self.stats.last_failure_time.isoformat()
+                    if self.stats.last_failure_time
+                    else None
+                ),
+                "last_success_time": (
+                    self.stats.last_success_time.isoformat()
+                    if self.stats.last_success_time
+                    else None
+                ),
+            },
         }
 
 
@@ -371,35 +445,39 @@ class CircuitBreakerRegistry:
     async def get_breaker(
         self,
         tool_name: str,
-        config: Optional[CircuitBreakerConfig] = None
+        config: Optional[CircuitBreakerConfig] = None,
+        project_id: Optional[str] = None,
     ) -> CircuitBreaker:
         """
-        Get or create circuit breaker for a tool.
+        Get or create circuit breaker for a tool within a tenant.
 
         Args:
             tool_name: Name of the tool
             config: Optional configuration
+            project_id: Tenant scope; each project gets its own breaker
 
         Returns:
             CircuitBreaker instance
         """
+        key = scoped_key(project_id, tool_name)
         async with self.lock:
-            if tool_name not in self.breakers:
-                self.breakers[tool_name] = CircuitBreaker(tool_name, config)
-                logger.info(f"Created circuit breaker for tool: {tool_name}")
+            if key not in self.breakers:
+                self.breakers[key] = CircuitBreaker(tool_name, config, scope=project_id)
+                logger.info(f"Created circuit breaker for tool: {tool_name} (scope={project_id})")
 
-            return self.breakers[tool_name]
+            return self.breakers[key]
 
-    def has_breaker(self, tool_name: str) -> bool:
-        """Check if tool has a circuit breaker."""
-        return tool_name in self.breakers
+    def has_breaker(self, tool_name: str, project_id: Optional[str] = None) -> bool:
+        """Check if a tool has a circuit breaker in this tenant."""
+        return scoped_key(project_id, tool_name) in self.breakers
 
     async def execute_with_breaker(
         self,
         tool_name: str,
         tool_func: Callable,
         *args: Any,
-        **kwargs: Any
+        project_id: Optional[str] = None,
+        **kwargs: Any,
     ) -> Any:
         """
         Execute tool function with circuit breaker protection.
@@ -416,7 +494,7 @@ class CircuitBreakerRegistry:
         Raises:
             RuntimeError: If circuit is open
         """
-        breaker = await self.get_breaker(tool_name)
+        breaker = await self.get_breaker(tool_name, project_id=project_id)
         return await breaker.execute_with_protection(tool_func, *args, **kwargs)
 
     def get_all_status(self) -> Dict[str, Dict[str, Any]]:
@@ -426,24 +504,23 @@ class CircuitBreakerRegistry:
         Returns:
             Dictionary of breaker statuses
         """
-        return {
-            tool_name: breaker.get_status()
-            for tool_name, breaker in self.breakers.items()
-        }
+        return {tool_name: breaker.get_status() for tool_name, breaker in self.breakers.items()}
 
-    def reset_breaker(self, tool_name: str) -> bool:
+    def reset_breaker(self, tool_name: str, project_id: Optional[str] = None) -> bool:
         """
         Manually reset a circuit breaker.
 
         Args:
             tool_name: Name of the tool
+            project_id: Tenant scope of the breaker
 
         Returns:
             True if breaker was found and reset
         """
-        if tool_name in self.breakers:
-            self.breakers[tool_name].reset()
-            logger.info(f"Manually reset circuit breaker for: {tool_name}")
+        key = scoped_key(project_id, tool_name)
+        if key in self.breakers:
+            self.breakers[key].reset()
+            logger.info(f"Manually reset circuit breaker for: {tool_name} (scope={project_id})")
             return True
         return False
 
@@ -462,12 +539,10 @@ class CircuitBreakerRegistry:
         """
         total_breakers = len(self.breakers)
         open_breakers = sum(
-            1 for breaker in self.breakers.values()
-            if breaker.state == CircuitState.OPEN
+            1 for breaker in self.breakers.values() if breaker.state == CircuitState.OPEN
         )
         half_open_breakers = sum(
-            1 for breaker in self.breakers.values()
-            if breaker.state == CircuitState.HALF_OPEN
+            1 for breaker in self.breakers.values() if breaker.state == CircuitState.HALF_OPEN
         )
 
         all_stats = {
@@ -489,14 +564,14 @@ class CircuitBreakerRegistry:
             total_failures += stats.failed_calls
             total_rejected += stats.rejected_calls
 
-        all_stats.update({
-            "total_calls": total_calls,
-            "total_failures": total_failures,
-            "total_rejected": total_rejected,
-            "system_failure_rate": (
-                total_failures / total_calls if total_calls > 0 else 0
-            ),
-        })
+        all_stats.update(
+            {
+                "total_calls": total_calls,
+                "total_failures": total_failures,
+                "total_rejected": total_rejected,
+                "system_failure_rate": (total_failures / total_calls if total_calls > 0 else 0),
+            }
+        )
 
         return all_stats
 
@@ -526,10 +601,7 @@ def set_circuit_breaker_registry(registry: CircuitBreakerRegistry) -> None:
 
 # Helper function to integrate circuit breaker into tool execution
 async def execute_with_circuit_breaker(
-    tool_name: str,
-    tool_func: Callable,
-    *args: Any,
-    **kwargs: Any
+    tool_name: str, tool_func: Callable, *args: Any, **kwargs: Any
 ) -> Any:
     """
     Convenience function to execute tool with circuit breaker protection.

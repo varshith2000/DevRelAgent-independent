@@ -118,6 +118,7 @@ files = [
     "apps/backend/db",
     "apps/backend/auth",
     "apps/backend/sessions",
+    "apps/backend/shared",
 ]
 ignore_missing_imports = true
 follow_imports = "silent"

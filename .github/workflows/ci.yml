@@ -38,9 +38,9 @@ jobs:
           black --check
           apps/backend/config apps/backend/observability
           apps/backend/auth apps/backend/db apps/backend/sessions
-          apps/backend/alembic
+          apps/backend/shared apps/backend/alembic
           apps/backend/routes/workspaces.py apps/backend/routes/identity.py
-          tests/conftest.py tests/test_tenancy
+          tests/conftest.py tests/test_tenancy tests/test_limits
 
       - name: Type check (mypy)
         run: mypy

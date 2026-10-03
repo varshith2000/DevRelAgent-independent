@@ -266,6 +266,9 @@ confined to it.
   a single process, `redis` for multiple replicas).
 - **Audit trail and approvals** are persisted in the system of record and scoped
   to a project, so history survives restarts and never leaks across tenants.
+- **Guardrail and limit state** (rate-limit windows, token budgets, circuit
+  breakers) lives in a shared state backend (`SESSION_BACKEND=redis`) and is
+  scoped per project, so every replica enforces the same limits.
 
 Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/members`,
 `GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`, and
@@ -277,12 +280,16 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
   backend, and audit entries plus approval decisions are durable and scoped per
   project. Remaining gap: an approval decision must be resolved by the process
   waiting on it (the signal is in-process).
+- **Shared limits (Phase 3)**: rate-limit windows, token budgets and circuit
+  breakers are shared across replicas and scoped per project, so limits hold
+  under horizontal scaling instead of being enforced independently per process.
 - **Not certified**: DevRelAgent holds no security certification and makes no
   compliance guarantee. It implements some controls that *support* compliance
   work (PII redaction, audit logging, approval gates); certification would
   require an independent audit.
 - **Scale**: the API is async and can run multiple replicas with
-  `SESSION_BACKEND=redis`; vector indexes remain process-local
+  `SESSION_BACKEND=redis`; sessions and guardrail/limit state are shared across
+  replicas, while vector indexes remain process-local
 - **Monitoring**: health and metrics endpoints are provided
 
 ### Support

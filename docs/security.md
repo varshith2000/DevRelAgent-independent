@@ -183,6 +183,9 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Audit Attribution**: actions attributed to a session and user
 - **Durable, tenant-scoped records**: audit entries and approval decisions are
   persisted per project and survive restarts; reads are always scoped
+- **Shared, tenant-scoped limits**: rate-limit windows, token budgets and
+  circuit breakers live in a shared state backend and are keyed per project, so
+  every replica enforces the same limits
 - **Remaining gap**: an approval decision must be resolved by the process that
   is waiting for it (the in-process signal is not yet shared via pub/sub)
 
@@ -209,7 +212,7 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Network Restrictions**: Controls external network access
 
 #### **Resource Exhaustion**
-- **Rate Limiting**: Limits request frequency
+- **Rate Limiting**: Limits request frequency, shared across replicas and scoped per project
 - **Timeouts**: All operations have timeouts
 - **Memory Limits**: Constrains memory usage
 - **Concurrency Limits**: Limits concurrent operations
@@ -315,7 +318,7 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - [ ] Approval workflow enabled for risky actions
 - [ ] Audit logging enabled and configured
 - [ ] TLS/SSL enabled
-- [ ] Rate limiting configured
+- [x] Rate limiting configured (shared state backend + per-project scoping)
 - [ ] Secrets properly configured
 - [ ] Network restrictions in place
 - [ ] Monitoring and alerting configured

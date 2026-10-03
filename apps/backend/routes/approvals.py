@@ -8,7 +8,7 @@ Frontend uses these endpoints to respond to approval requests.
 import logging
 from typing import List, Optional
 
-from auth.deps import get_request_context
+from auth.deps import RequestContext, get_request_context
 from fastapi import APIRouter, Depends, HTTPException, Query
 from guardrails.approval_guard import get_approval_guard
 from models.approval import ApprovalRequest, ApprovalResponse, ApprovalStatus
@@ -39,7 +39,8 @@ class ApprovalListResponse(BaseModel):
 @router.post("/{approval_id}", response_model=ApprovalResponse)
 async def respond_to_approval(
     approval_id: str,
-    decision: ApprovalDecisionRequest
+    decision: ApprovalDecisionRequest,
+    context: RequestContext = Depends(get_request_context),
 ):
     """
     Submit an approval decision (approve or reject).
@@ -58,8 +59,9 @@ async def respond_to_approval(
     """
     approval_guard = get_approval_guard()
 
-    # Check if approval is pending
-    pending = approval_guard.list_pending_approvals()
+    # Check if approval is pending in the caller's tenant
+    project_id = context.project.id if context.project else None
+    pending = approval_guard.list_pending_approvals(project_id=project_id)
     approval_exists = any(p.approval_id == approval_id for p in pending)
 
     if not approval_exists:
@@ -94,15 +96,18 @@ async def respond_to_approval(
 
 
 @router.get("/pending", response_model=ApprovalStatus)
-async def list_pending_approvals():
+async def list_pending_approvals(
+    context: RequestContext = Depends(get_request_context),
+):
     """
-    List all pending approvals.
+    List currently pending approvals for the caller's project.
 
     Returns:
         List of currently pending approval requests
     """
     approval_guard = get_approval_guard()
-    pending = approval_guard.list_pending_approvals()
+    project_id = context.project.id if context.project else None
+    pending = approval_guard.list_pending_approvals(project_id=project_id)
 
     return ApprovalStatus(
         pending_approvals=pending,
@@ -113,7 +118,8 @@ async def list_pending_approvals():
 @router.get("/history")
 async def get_approval_history(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of history entries"),
-    action_type: Optional[str] = Query(None, description="Filter by action type")
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    context: RequestContext = Depends(get_request_context),
 ):
     """
     Get approval history for audit trail.
@@ -126,7 +132,10 @@ async def get_approval_history(
         List of approval history entries
     """
     approval_guard = get_approval_guard()
-    history = approval_guard.get_approval_history(limit=limit, action_type=action_type)
+    project_id = context.project.id if context.project else None
+    history = approval_guard.get_approval_history(
+        limit=limit, action_type=action_type, project_id=project_id
+    )
 
     return {
         "history": history,
@@ -154,7 +163,9 @@ async def list_actions_requiring_approval():
 
 
 @router.get("/health")
-async def approvals_health():
+async def approvals_health(
+    context: RequestContext = Depends(get_request_context),
+):
     """
     Health check for the approval system.
 
@@ -162,11 +173,13 @@ async def approvals_health():
         Status of the approval system
     """
     approval_guard = get_approval_guard()
-    pending = approval_guard.list_pending_approvals()
+    project_id = context.project.id if context.project else None
+    pending = approval_guard.list_pending_approvals(project_id=project_id)
+    history = approval_guard.get_approval_history(limit=1000, project_id=project_id)
 
     return {
         "status": "healthy",
         "pending_approvals": len(pending),
         "timeout_seconds": approval_guard.timeout_seconds,
-        "history_entries": len(approval_guard.approval_history)
+        "history_entries": len(history),
     }

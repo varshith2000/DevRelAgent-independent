@@ -75,7 +75,12 @@ class AuditEntry(BaseModel):
     # Session and User Information
     session_id: str = Field(description="Session identifier")
     user_id: Optional[str] = Field(default=None, description="User identifier (if authenticated)")
-    tenant_id: Optional[str] = Field(default=None, description="Tenant identifier (if multi-tenant)")
+    tenant_id: Optional[str] = Field(
+        default=None, description="Tenant identifier (the active project in Phase 1+)"
+    )
+    workspace_id: Optional[str] = Field(
+        default=None, description="Workspace identifier (if multi-tenant)"
+    )
     correlation_id: Optional[str] = Field(default=None, description="Correlation ID for distributed tracing")
 
     # Action Information
@@ -225,6 +230,7 @@ class AuditFilter(BaseModel):
     session_id: Optional[str] = Field(default=None, description="Filter by session ID")
     user_id: Optional[str] = Field(default=None, description="Filter by user ID")
     tenant_id: Optional[str] = Field(default=None, description="Filter by tenant ID")
+    workspace_id: Optional[str] = Field(default=None, description="Filter by workspace ID")
     correlation_id: Optional[str] = Field(default=None, description="Filter by correlation ID")
 
     # Action Filters
@@ -331,8 +337,8 @@ class AuditSummary(BaseModel):
 
     # Total Counts
     total_entries: int = Field(description="Total number of audit entries")
-    total_sessions: int = Field(description="Number of unique sessions")
-    total_users: int = Field(description="Number of unique users")
+    total_sessions: int = Field(default=0, description="Number of unique sessions")
+    total_users: int = Field(default=0, description="Number of unique users")
 
     # By Action Type
     by_action_type: Dict[str, int] = Field(

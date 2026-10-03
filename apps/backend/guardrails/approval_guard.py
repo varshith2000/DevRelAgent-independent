@@ -3,14 +3,21 @@ Approval Guard — Human-in-the-Loop Middleware
 
 Ensures high-risk actions require explicit user approval before execution.
 Integrates with SSE streaming to request approvals from the frontend.
+
+Approval requests and their outcomes are persisted in the system of record,
+scoped to a workspace/project, so the audit trail survives restarts and never
+leaks across tenants. The in-process :class:`asyncio.Event` used to *wait* for a
+decision is necessarily process-local; resolving an approval from a different
+worker still requires a shared signal (tracked as a follow-up).
 """
 
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
+from config.settings import get_settings
 from models.approval import ApprovalEvent, ApprovalRequest, ApprovalResponse
 
 logger = logging.getLogger(__name__)
@@ -24,7 +31,7 @@ class ApprovalGuard:
     - Action-based approval requirements
     - Async wait for user approval/responses
     - Timeout handling with automatic rejection
-    - Approval history logging
+    - Durable, tenant-scoped approval history
     - SSE event emission for real-time UI updates
     """
 
@@ -47,46 +54,22 @@ class ApprovalGuard:
         """
         self.timeout_seconds = timeout_seconds
 
-        # Pending approvals waiting for responses
+        # In-flight approvals for this process (needed to wait on decisions).
         self.pending_approvals: Dict[str, ApprovalRequest] = {}
-
-        # Async events for signaling when approval is received
         self.approval_events: Dict[str, asyncio.Event] = {}
-
-        # Stored responses (populated by approval endpoint)
         self.approval_responses: Dict[str, ApprovalResponse] = {}
-
-        # Approval history for audit logging
-        self.approval_history: List[Dict[str, Any]] = []
 
         # SSE event queue for emitting approval requests
         self.sse_queue: Optional[asyncio.Queue] = None
 
-        logger.info("✅ ApprovalGuard initialized")
+        logger.info("[OK] ApprovalGuard initialized")
 
     def requires_approval(self, action: str, context: Optional[Dict[str, Any]] = None) -> bool:
-        """
-        Check if an action requires approval.
-
-        Args:
-            action: Action/tool name to check
-            context: Optional context for the action
-
-        Returns:
-            True if action requires approval
-        """
+        """Return True if the action requires human approval."""
         return action in self.ACTIONS_REQUIRING_APPROVAL
 
     def get_risk_level(self, action: str) -> Optional[Literal["low", "medium", "high", "critical"]]:
-        """
-        Get the risk level for an action.
-
-        Args:
-            action: Action/tool name
-
-        Returns:
-            Risk level or None if action doesn't require approval
-        """
+        """Return the risk level for an action, or None if it needs no approval."""
         return self.ACTIONS_REQUIRING_APPROVAL.get(action)
 
     async def request_approval(
@@ -94,16 +77,20 @@ class ApprovalGuard:
         action_type: str,
         plan: List[str],
         metadata: Optional[Dict[str, Any]] = None,
-        timeout_seconds: Optional[int] = None
+        timeout_seconds: Optional[int] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> ApprovalResponse:
         """
-        Request approval for an action and wait for response.
+        Request approval for an action and wait for a response.
 
         Args:
             action_type: Type of action requiring approval
             plan: Step-by-step plan of the action
             metadata: Additional context about the action
             timeout_seconds: Override default timeout
+            project_id: Owning project (tenant) for durable storage
+            workspace_id: Owning workspace for durable storage
 
         Returns:
             ApprovalResponse with approved=True/False
@@ -116,77 +103,50 @@ class ApprovalGuard:
             return ApprovalResponse(
                 approval_id=approval_id,
                 approved=True,
-                reason="Action does not require approval"
+                reason="Action does not require approval",
             )
 
-        # Create approval request
         request = ApprovalRequest(
             approval_id=approval_id,
             action_type=action_type,
             plan=plan,
             risk_level=risk_level,
             metadata=metadata or {},
-            timeout_seconds=timeout_seconds or self.timeout_seconds
+            timeout_seconds=timeout_seconds or self.timeout_seconds,
         )
 
-        # Store pending approval
         self.pending_approvals[approval_id] = request
         self.approval_events[approval_id] = asyncio.Event()
+        self._persist_request(request, project_id, workspace_id)
 
-        # Emit SSE event for frontend
         await self._emit_approval_request(request)
+        logger.info(f"[PENDING] Approval requested: {approval_id} for {action_type}")
 
-        logger.info(f"⏳ Approval requested: {approval_id} for {action_type}")
-
-        # Wait for response with timeout
-        timeout = request.timeout_seconds
         try:
             await asyncio.wait_for(
-                self.approval_events[approval_id].wait(),
-                timeout=timeout
+                self.approval_events[approval_id].wait(), timeout=request.timeout_seconds
             )
         except asyncio.TimeoutError:
-            # Timeout - auto reject
-            logger.warning(f"⏰ Approval timeout: {approval_id}")
-
-            # Clean up
-            del self.pending_approvals[approval_id]
-            del self.approval_events[approval_id]
-
-            # Create rejection response
+            logger.warning(f"[TIMEOUT] Approval timeout: {approval_id}")
             response = ApprovalResponse(
                 approval_id=approval_id,
                 approved=False,
-                reason=f"Approval timeout after {timeout} seconds"
+                reason=f"Approval timeout after {request.timeout_seconds} seconds",
             )
-
-            # Log to history
-            self._log_to_history(request, response)
-
+            self._finish(request, status="timeout", response=response)
             return response
 
-        # Get response (set by approval endpoint)
         response = self.approval_responses.get(approval_id)
-
         if not response:
-            # Shouldn't happen, but handle gracefully
-            logger.error(f"❌ Approval response missing: {approval_id}")
+            logger.error(f"[ERROR] Approval response missing: {approval_id}")
             response = ApprovalResponse(
                 approval_id=approval_id,
                 approved=False,
-                reason="Internal error: approval response not found"
+                reason="Internal error: approval response not found",
             )
 
-        # Clean up
-        del self.pending_approvals[approval_id]
-        del self.approval_events[approval_id]
-        del self.approval_responses[approval_id]
-
-        # Log to history
-        self._log_to_history(request, response)
-
-        logger.info(f"✅ Approval {'granted' if response.approved else 'denied'}: {approval_id}")
-
+        self._finish(request, status="approved" if response.approved else "rejected", response=response)
+        logger.info(f"[OK] Approval {'granted' if response.approved else 'denied'}: {approval_id}")
         return response
 
     async def respond_to_approval(
@@ -194,157 +154,143 @@ class ApprovalGuard:
         approval_id: str,
         approved: bool,
         user: Optional[str] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
     ) -> bool:
         """
-        Handle approval response from frontend.
+        Handle an approval response from the frontend.
 
-        Called by the approval API endpoint when user approves/rejects.
-
-        Args:
-            approval_id: ID of the approval request
-            approved: True if approved, False if rejected
-            user: Optional user identifier
-            reason: Optional reason for rejection
-
-        Returns:
-            True if response was recorded successfully
+        Returns True if a waiting request was signalled.
         """
         if approval_id not in self.approval_events:
-            logger.warning(f"⚠️ Approval not found or already processed: {approval_id}")
+            logger.warning(f"[WARN] Approval not found or already processed: {approval_id}")
             return False
 
-        # Store response
-        response = ApprovalResponse(
+        self.approval_responses[approval_id] = ApprovalResponse(
             approval_id=approval_id,
             approved=approved,
             user=user,
-            reason=reason
+            reason=reason,
         )
-
-        self.approval_responses[approval_id] = response
-
-        # Signal waiting coroutine
         self.approval_events[approval_id].set()
-
-        logger.info(f"📝 Approval response recorded: {approval_id} - {approved}")
-
+        logger.info(f"[OK] Approval response recorded: {approval_id} - {approved}")
         return True
 
-    def list_pending_approvals(self) -> List[ApprovalRequest]:
-        """
-        List all currently pending approvals.
+    def list_pending_approvals(self, project_id: Optional[str] = None) -> List[ApprovalRequest]:
+        """List pending approvals, optionally scoped to a project."""
+        try:
+            from db import repositories
 
-        Returns:
-            List of pending approval requests
-        """
-        return list(self.pending_approvals.values())
+            rows = repositories.list_pending_approvals(project_id=project_id)
+        except Exception as e:
+            logger.warning(f"Could not read approvals from database ({e}); using memory")
+            return list(self.pending_approvals.values())
+
+        return [
+            ApprovalRequest(
+                approval_id=row["approval_id"],
+                action_type=row["action_type"],
+                plan=row["plan"],
+                risk_level=row["risk_level"],
+                metadata=row["metadata"],
+                timeout_seconds=row["timeout_seconds"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     def get_approval_history(
         self,
         limit: int = 100,
-        action_type: Optional[str] = None
+        action_type: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Get approval history.
+        """Get decided approvals for a scope, most recent first."""
+        try:
+            from db import repositories
 
-        Args:
-            limit: Maximum number of history entries to return
-            action_type: Filter by specific action type
-
-        Returns:
-            List of approval history entries
-        """
-        history = self.approval_history
-
-        if action_type:
-            history = [h for h in history if h.get("action_type") == action_type]
-
-        # Return most recent first
-        return list(reversed(history[-limit:]))
+            return repositories.get_approval_history(
+                project_id=project_id, limit=limit, action_type=action_type
+            )
+        except Exception as e:
+            logger.warning(f"Could not read approval history from database: {e}")
+            return []
 
     def set_sse_queue(self, queue: asyncio.Queue):
-        """
-        Set the SSE queue for emitting approval events.
-
-        Called during initialization to connect to the SSE streaming system.
-
-        Args:
-            queue: Async queue for SSE events
-        """
+        """Set the SSE queue for emitting approval events."""
         self.sse_queue = queue
-        logger.info("📡 SSE queue connected to ApprovalGuard")
+        logger.info("[OK] SSE queue connected to ApprovalGuard")
+
+    # ── Internals ─────────────────────────────────────────────────────
+
+    def _persist_request(
+        self, request: ApprovalRequest, project_id: Optional[str], workspace_id: Optional[str]
+    ) -> None:
+        try:
+            from db import repositories
+
+            repositories.create_approval(
+                approval_id=request.approval_id,
+                action_type=request.action_type,
+                risk_level=request.risk_level,
+                plan=request.plan,
+                metadata=request.metadata or {},
+                timeout_seconds=request.timeout_seconds,
+                created_at=request.created_at,
+                workspace_id=workspace_id,
+                project_id=project_id,
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist approval request: {e}")
+
+    def _finish(self, request: ApprovalRequest, status: str, response: ApprovalResponse) -> None:
+        """Release in-process state and record the durable decision."""
+        self.pending_approvals.pop(request.approval_id, None)
+        self.approval_events.pop(request.approval_id, None)
+        self.approval_responses.pop(request.approval_id, None)
+
+        try:
+            from db import repositories
+
+            repositories.resolve_approval(
+                request.approval_id,
+                status=status,
+                approved=response.approved,
+                user=response.user,
+                reason=response.reason,
+                responded_at=response.timestamp,
+                duration_seconds=(response.timestamp - request.created_at).total_seconds(),
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist approval decision: {e}")
 
     async def _emit_approval_request(self, request: ApprovalRequest):
-        """
-        Emit SSE event for approval request.
-
-        Args:
-            request: Approval request to emit
-        """
+        """Emit an SSE event for the approval request."""
         if self.sse_queue:
             event = ApprovalEvent(type="approval_required", data=request)
             try:
                 await self.sse_queue.put(event)
-                logger.debug(f"📤 Emitted approval event: {request.approval_id}")
+                logger.debug(f"[SSE] Emitted approval event: {request.approval_id}")
             except Exception as e:
-                logger.error(f"❌ Failed to emit approval event: {e}")
+                logger.error(f"[ERROR] Failed to emit approval event: {e}")
         else:
-            logger.warning("⚠️ SSE queue not set, approval event not emitted")
-
-    def _log_to_history(self, request: ApprovalRequest, response: ApprovalResponse):
-        """
-        Log approval to history for audit trail.
-
-        Args:
-            request: Original approval request
-            response: Approval response
-        """
-        entry = {
-            "approval_id": request.approval_id,
-            "action_type": request.action_type,
-            "risk_level": request.risk_level,
-            "approved": response.approved,
-            "user": response.user,
-            "reason": response.reason,
-            "created_at": request.created_at.isoformat(),
-            "responded_at": response.timestamp.isoformat(),
-            "duration_seconds": (response.timestamp - request.created_at).total_seconds(),
-            "plan": request.plan,
-            "metadata": request.metadata
-        }
-
-        self.approval_history.append(entry)
-
-        # Keep history manageable
-        if len(self.approval_history) > 1000:
-            self.approval_history = self.approval_history[-1000:]
+            logger.warning("[WARN] SSE queue not set, approval event not emitted")
 
 
-# Global singleton instance
+# ── Global singleton ──────────────────────────────────────────────────
+
 _approval_guard: Optional[ApprovalGuard] = None
 
 
 def get_approval_guard() -> ApprovalGuard:
-    """
-    Get the global ApprovalGuard instance.
-
-    Returns:
-        The singleton ApprovalGuard instance
-    """
+    """Get the global ApprovalGuard instance."""
     global _approval_guard
     if _approval_guard is None:
-        _approval_guard = ApprovalGuard()
+        _approval_guard = ApprovalGuard(timeout_seconds=get_settings().approval_timeout_seconds)
     return _approval_guard
 
 
 def set_approval_guard(guard: ApprovalGuard):
-    """
-    Set a custom ApprovalGuard instance (useful for testing).
-
-    Args:
-        guard: ApprovalGuard instance to use
-    """
+    """Set a custom ApprovalGuard instance (useful for testing)."""
     global _approval_guard
     _approval_guard = guard
 

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from audit.logger import get_audit_logger
 from audit.schemas import AuditEntry, AuditExport, AuditFilter, AuditSummary
-from auth.deps import get_request_context
+from auth.deps import RequestContext, get_request_context
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
@@ -33,9 +33,18 @@ router = APIRouter(
 )
 
 
+def _project_id(context: RequestContext) -> Optional[str]:
+    return context.project.id if context.project else None
+
+
+def _workspace_id(context: RequestContext) -> str:
+    return context.workspace.id
+
+
 @router.get("/recent", response_model=List[AuditEntry])
 async def get_recent_entries(
     limit: int = Query(50, ge=1, le=500, description="Maximum entries to return"),
+    context: RequestContext = Depends(get_request_context),
 ) -> List[AuditEntry]:
     """
     Get recent audit entries from the in-memory cache.
@@ -51,7 +60,11 @@ async def get_recent_entries(
     """
     try:
         audit_logger = await get_audit_logger()
-        entries = await audit_logger.get_recent(limit=limit)
+        entries = await audit_logger.get_recent(
+            limit=limit,
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
 
         logger.info(f"Retrieved {len(entries)} recent audit entries")
         return entries
@@ -65,6 +78,7 @@ async def get_recent_entries(
 async def get_session_audit_trail(
     session_id: str,
     limit: int = Query(100, ge=1, le=10000, description="Maximum entries to return"),
+    context: RequestContext = Depends(get_request_context),
 ) -> List[AuditEntry]:
     """
     Get complete audit trail for a specific session.
@@ -87,7 +101,12 @@ async def get_session_audit_trail(
     """
     try:
         audit_logger = await get_audit_logger()
-        entries = await audit_logger.query_session(session_id=session_id, limit=limit)
+        entries = await audit_logger.query_session(
+            session_id=session_id,
+            limit=limit,
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
 
         logger.info(f"Retrieved {len(entries)} entries for session {session_id}")
         return entries
@@ -103,6 +122,7 @@ async def get_session_audit_trail(
 @router.post("/query", response_model=List[AuditEntry])
 async def query_audit_trail(
     filters: AuditFilter,
+    context: RequestContext = Depends(get_request_context),
 ) -> List[AuditEntry]:
     """
     Query audit trail with advanced filters.
@@ -125,6 +145,9 @@ async def query_audit_trail(
     """
     try:
         audit_logger = await get_audit_logger()
+        # Force the caller's tenant scope; filters can never widen it.
+        filters.tenant_id = _project_id(context)
+        filters.workspace_id = _workspace_id(context)
         entries = await audit_logger.query(filters=filters)
 
         logger.info(
@@ -154,6 +177,7 @@ async def get_audit_summary(
         None,
         description="End time (ISO format), defaults to now"
     ),
+    context: RequestContext = Depends(get_request_context),
 ) -> AuditSummary:
     """
     Get audit summary statistics for a time period.
@@ -182,7 +206,12 @@ async def get_audit_summary(
     """
     try:
         audit_logger = await get_audit_logger()
-        summary = await audit_logger.get_summary(start_time=start_time, end_time=end_time)
+        summary = await audit_logger.get_summary(
+            start_time=start_time,
+            end_time=end_time,
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
 
         logger.info(
             f"Generated summary for period {start_time} to {end_time}: "
@@ -198,6 +227,7 @@ async def get_audit_summary(
 @router.post("/export")
 async def export_audit_trail(
     export_config: AuditExport,
+    context: RequestContext = Depends(get_request_context),
 ) -> Dict[str, str]:
     """
     Export audit trail for a session.
@@ -221,8 +251,12 @@ async def export_audit_trail(
     try:
         audit_logger = await get_audit_logger()
 
-        # Generate export
-        file_path = await audit_logger.export(export_config)
+        # Generate export (scoped to the caller's tenant)
+        file_path = await audit_logger.export(
+            export_config,
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
 
         # Generate download URL
         filename = os.path.basename(file_path)
@@ -334,7 +368,9 @@ async def delete_session_audit_trail(
 
 
 @router.get("/stats")
-async def get_audit_stats() -> Dict[str, Any]:
+async def get_audit_stats(
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, Any]:
     """
     Get quick audit statistics for dashboard display.
 
@@ -347,7 +383,11 @@ async def get_audit_stats() -> Dict[str, Any]:
         audit_logger = await get_audit_logger()
 
         # Get recent entries for stats
-        recent = await audit_logger.get_recent(limit=1000)
+        recent = await audit_logger.get_recent(
+            limit=1000,
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
 
         # Calculate quick stats
         stats = {
@@ -380,7 +420,9 @@ async def get_audit_stats() -> Dict[str, Any]:
 
 
 @router.get("/health")
-async def audit_health() -> Dict[str, Any]:
+async def audit_health(
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, Any]:
     """
     Health check for audit system.
 
@@ -390,8 +432,14 @@ async def audit_health() -> Dict[str, Any]:
     try:
         audit_logger = await get_audit_logger()
 
-        # Count recent entries in cache
-        cache_size = len(await audit_logger.get_recent(limit=10000))
+        # Count recent entries for this tenant
+        cache_size = len(
+            await audit_logger.get_recent(
+                limit=10000,
+                project_id=_project_id(context),
+                workspace_id=_workspace_id(context),
+            )
+        )
 
         # Check storage directory
         storage_exists = os.path.exists(audit_logger.storage_path)

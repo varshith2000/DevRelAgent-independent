@@ -8,6 +8,7 @@ at Postgres/Supabase for a real deployment.
 
 from db.base import Base
 from db.models import ApiKey, Membership, Project, User, Workspace
+from db.models_audit import ApprovalRecord, AuditRecord
 from db.session import get_engine, get_session, init_db, reset_engine
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "Membership",
     "Project",
     "ApiKey",
+    "AuditRecord",
+    "ApprovalRecord",
     "get_engine",
     "get_session",
     "init_db",

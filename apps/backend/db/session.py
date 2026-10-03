@@ -76,7 +76,7 @@ def init_db() -> None:
 
     Convenience for development and tests. Production uses Alembic migrations.
     """
-    from db import models  # noqa: F401  (register tables on Base.metadata)
+    from db import models, models_audit  # noqa: F401  (register tables on Base.metadata)
 
     Base.metadata.create_all(bind=get_engine())
 

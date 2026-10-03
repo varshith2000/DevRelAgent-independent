@@ -264,6 +264,8 @@ confined to it.
   Set `DATABASE_AUTO_CREATE=false` in production.
 - **Sessions** are shared through a pluggable store (`SESSION_BACKEND=memory` for
   a single process, `redis` for multiple replicas).
+- **Audit trail and approvals** are persisted in the system of record and scoped
+  to a project, so history survives restarts and never leaks across tenants.
 
 Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/members`,
 `GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`, and
@@ -272,8 +274,9 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
 ### Deployment Considerations
 
 - **Multi-tenant (Phase 1)**: workspace/project isolation is enforced in the
-  backend. Remaining gap: guardrail/approval/audit state is still process-local
-  and not yet partitioned per project.
+  backend, and audit entries plus approval decisions are durable and scoped per
+  project. Remaining gap: an approval decision must be resolved by the process
+  waiting on it (the signal is in-process).
 - **Not certified**: DevRelAgent holds no security certification and makes no
   compliance guarantee. It implements some controls that *support* compliance
   work (PII redaction, audit logging, approval gates); certification would

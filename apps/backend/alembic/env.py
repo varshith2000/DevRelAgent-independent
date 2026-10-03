@@ -19,7 +19,7 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import get_settings  # noqa: E402
-from db import models  # noqa: E402,F401  (register tables on the metadata)
+from db import models, models_audit  # noqa: E402,F401  (register tables on the metadata)
 from db.base import Base  # noqa: E402
 
 config = context.config

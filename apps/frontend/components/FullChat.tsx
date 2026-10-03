@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Paperclip, X, Plus, Clock, Trash2, FileText, Image, File, Activity, BookOpen, ShieldCheck, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Send, Bot, Paperclip, X, Plus, Clock, Trash2, FileText, Image, File, Activity, BookOpen, ShieldCheck, PanelLeftClose, PanelLeftOpen, Sparkles, ArrowUpRight, Command } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { SqlSandbox } from './SqlSandbox';
 import { AppHeader } from './AppHeader';
@@ -398,7 +398,7 @@ export function FullChat() {
                         <label className="conversation-search"><Activity size={15} /><input aria-label="Search conversations" placeholder="Find a conversation" value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} /><span>⌘ K</span></label>
                     </div>
                     <div className="chat-sidebar-label">YOUR RECENT WORK</div>
-                    <div className="chat-thread-list">
+                    <div className="chat-thread-list" aria-label="Recent conversations">
                         {conversations.filter((conversation) => conversation.title.toLowerCase().includes(conversationSearch.toLowerCase())).map((conv) => (
                             <div key={conv.id} className="chat-thread-row">
                                 <button
@@ -437,10 +437,27 @@ export function FullChat() {
                             </button>
                             <div><h1>{currentConv?.title || 'New conversation'}</h1><p>Ask a question or describe an issue to investigate.</p></div>
                         </div>
-                        <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? 'API connected' : backendReady === false ? 'API offline' : 'Checking API'}</span>
+                        <div className="chat-heading-status">
+                            <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? 'API connected' : backendReady === false ? 'API offline' : 'Checking API'}</span>
+                            <span className="chat-scope-badge"><ShieldCheck size={13} /> Scoped to this project</span>
+                        </div>
                     </div>
                     {/* Messages */}
-                    <div className="chat-messages">
+                    <div className={`chat-messages ${currentConv?.messages.length === 1 ? 'chat-messages-welcome' : ''}`}>
+                        {currentConv?.messages.length === 1 && (
+                            <section className="chat-welcome-panel" aria-label="Start a conversation">
+                                <div className="chat-welcome-orb"><Sparkles size={20} /></div>
+                                <p className="chat-welcome-kicker">YOUR ENGINEERING COPILOT</p>
+                                <h2>What are you working on?</h2>
+                                <p className="chat-welcome-description">Ask a question, explore your codebase, or investigate a service issue. I’ll use the tools and project context available in this workspace.</p>
+                                <div className="chat-suggestion-grid">
+                                    <button type="button" onClick={() => setInputValue('Help me understand the architecture of this project.')}><span><BookOpen size={16} /></span><span><strong>Understand this project</strong><small>Explore architecture and key components</small></span><ArrowUpRight size={15} /></button>
+                                    <button type="button" onClick={() => setInputValue('Help me investigate a service issue and identify useful evidence.')}><span><Activity size={16} /></span><span><strong>Investigate an issue</strong><small>Trace symptoms to useful signals</small></span><ArrowUpRight size={15} /></button>
+                                    <button type="button" onClick={() => setInputValue('Help me find the right documentation for my question.')}><span><FileText size={16} /></span><span><strong>Find technical guidance</strong><small>Search configured docs and knowledge</small></span><ArrowUpRight size={15} /></button>
+                                </div>
+                            </section>
+                        )}
+                        <div className="chat-conversation-stream">
                     {storageError && <div className="chat-inline-notice" role="status">Conversation history could not be saved to this browser. You can continue chatting, but it may not persist after refresh.</div>}
                     {currentConv?.messages.map((message) => (
                         <div key={message.id}>
@@ -460,6 +477,7 @@ export function FullChat() {
                     )}
 
                     <div ref={messagesEndRef} />
+                        </div>
                 </div>
 
                 {/* SQL Sandbox */}
@@ -518,6 +536,7 @@ export function FullChat() {
                         </button>
                         <div className="flex-1">
                             <textarea
+                                aria-label="Message"
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyPress}
@@ -537,7 +556,7 @@ export function FullChat() {
                             <Send className="w-5 h-5" />
                         </button>
                     </div>
-                        <p className="chat-composer-footnote">Only filenames are stored in chat history and included with your message. File contents are not uploaded or analyzed · 5 MB max per file · 10 files max.</p>
+                        <p className="chat-composer-footnote"><span><ShieldCheck size={12} /> Your workspace context stays scoped to this project</span><span><Command size={12} /> Enter to send · Shift + Enter for a new line</span></p>
                     </div>
                 </main>
             </div>

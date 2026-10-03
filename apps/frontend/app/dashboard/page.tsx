@@ -1,10 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Activity, Bot } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { AppHeader } from '../../components/AppHeader';
 import { DashboardFeed } from '../../components/DashboardFeed';
-import { ProjectSwitcher } from '../../components/ProjectSwitcher';
 import { SystemStatus } from '../../components/SystemStatus';
 import { apiFetch } from '../../lib/api';
 
@@ -13,7 +11,6 @@ interface ServiceStatus {
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({});
   const [isLoading, setIsLoading] = useState(true);
 
@@ -51,42 +48,11 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400" />
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  The Deck
-                </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Real-time system health monitoring
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3">
-            <ProjectSwitcher />
-
-            {/* Navigation Tabs */}
-            <div className="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 rounded-lg p-1">
-              <button
-                onClick={() => router.push('/')}
-                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-colors text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-800"
-              >
-                <Bot className="w-4 h-4" />
-                <span>Chat</span>
-              </button>
-              <button
-                className="flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm"
-              >
-                <Activity className="w-4 h-4" />
-                <span>Dashboard</span>
-              </button>
-            </div>
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          active="dashboard"
+          title="The Deck"
+          subtitle="Real-time system health monitoring"
+        />
 
         {/* System Status */}
         {!isLoading && (

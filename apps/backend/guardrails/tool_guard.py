@@ -866,6 +866,18 @@ class ToolGuardrail:
         }
         self.audit_log.append(entry)
 
+        # Record metrics (Phase 5) so tool behaviour is observable.
+        try:
+            from observability.metrics import get_metrics
+
+            get_metrics().counter(
+                "devrel_tool_calls_total",
+                "Total tool executions by outcome",
+                ("tool", "outcome"),
+            ).inc(labels={"tool": tool_name, "outcome": _tool_outcome(result)})
+        except Exception:  # metrics must never break tool execution
+            pass
+
         # Keep audit log manageable
         if len(self.audit_log) > 10000:
             self.audit_log = self.audit_log[-10000:]
@@ -1029,6 +1041,19 @@ class ScopeViolation(ToolExecutionError):
     """Exception for scope violation."""
 
     pass
+
+
+def _tool_outcome(result: ToolExecutionResult) -> str:
+    """Classify a tool result for the metrics label."""
+    if result.circuit_breaker_open:
+        return "circuit_open"
+    if result.rate_limited:
+        return "rate_limited"
+    if result.scope_violation:
+        return "scope_violation"
+    if result.timeout_occurred:
+        return "timeout"
+    return "success" if result.success else "error"
 
 
 # CLI for testing

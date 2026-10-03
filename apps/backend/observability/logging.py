@@ -12,8 +12,11 @@ import sys
 from contextvars import ContextVar
 from datetime import datetime, timezone
 
-# Correlation id for the in-flight request; populated by middleware.
+# Correlation ids for the in-flight request; populated by middleware.
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
+trace_id_var: ContextVar[str] = ContextVar("trace_id", default="-")
+span_id_var: ContextVar[str] = ContextVar("span_id", default="-")
+tenant_var: ContextVar[str] = ContextVar("tenant", default="-")
 
 _RESERVED = {
     "name",
@@ -50,6 +53,9 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
             "request_id": request_id_var.get(),
+            "trace_id": trace_id_var.get(),
+            "span_id": span_id_var.get(),
+            "tenant": tenant_var.get(),
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)

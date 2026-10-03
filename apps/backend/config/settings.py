@@ -120,6 +120,13 @@ class Settings(BaseSettings):
     http_rate_limit_window_seconds: int = 60
     http_rate_limit_exempt_paths: str = "/health,/metrics,/docs,/redoc,/openapi.json,/favicon.ico"
 
+    # ── Observability (Phase 5) ───────────────────────────────────────────
+    # Prometheus-style metrics at GET /metrics and span tracing with W3C
+    # traceparent propagation.
+    metrics_enabled: bool = True
+    tracing_enabled: bool = True
+    trace_sample_rate: float = 1.0
+
     # ── Health check scheduler ────────────────────────────────────────────
     health_check_enabled: bool = False
     health_check_interval_minutes: int = 5

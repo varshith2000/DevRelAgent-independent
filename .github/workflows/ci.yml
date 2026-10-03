@@ -40,7 +40,7 @@ jobs:
           apps/backend/auth apps/backend/db apps/backend/sessions
           apps/backend/shared apps/backend/alembic apps/backend/limits
           apps/backend/routes/workspaces.py apps/backend/routes/identity.py
-          tests/conftest.py tests/test_tenancy tests/test_limits
+          tests/conftest.py tests/test_tenancy tests/test_limits tests/test_observability
 
       - name: Type check (mypy)
         run: mypy

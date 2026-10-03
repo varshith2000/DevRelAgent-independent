@@ -241,6 +241,8 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Audit logging** of queries, tool calls and approval decisions
 - **Approval gates** for risky, write-like actions
 - **Data-access logging** for configured datasources
+- **Request/trace correlation and metrics** (`X-Request-Id`, W3C `traceparent`,
+  Prometheus metrics at `GET /metrics`) for monitoring and incident response
 
 ### Known Gaps
 

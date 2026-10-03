@@ -12,8 +12,9 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
 load_dotenv()
 
@@ -25,6 +26,8 @@ from db.session import init_db
 from guardrails.approval_guard import get_approval_guard
 from limits.http_limiter import HttpRateLimitMiddleware
 from observability.logging import configure_logging
+from observability.metrics import get_metrics
+from observability.middleware import ObservabilityMiddleware
 from routes.approvals import router as approvals_router
 from routes.audit import router as audit_router
 from routes.chat import router as chat_router
@@ -254,8 +257,10 @@ app.add_middleware(
 )
 
 # Edge rate limiting — shared, per-project/identity budget in front of every
-# endpoint (see limits/http_limiter.py).
+# endpoint (see limits/http_limiter.py), then request/trace correlation and
+# metrics as the outermost layer so even rate-limited responses are observed.
 app.add_middleware(HttpRateLimitMiddleware)
+app.add_middleware(ObservabilityMiddleware)
 
 
 # ─── Health ──────────────────────────────────────────
@@ -283,6 +288,18 @@ app.include_router(approvals_router, tags=["approvals"])
 app.include_router(audit_router, tags=["audit"])
 
 
+# ─── Metrics ───────────────────────────────────────────
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint() -> PlainTextResponse:
+    """Prometheus text exposition of process metrics."""
+    if not get_settings().metrics_enabled:
+        raise HTTPException(status_code=404, detail="Metrics disabled")
+    return PlainTextResponse(
+        get_metrics().render(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 # ─── Root ──────────────────────────────────────────────
 @app.get("/")
 async def root():
@@ -304,6 +321,7 @@ async def root():
             "audit_query": "/audit/query",
             "audit_summary": "/audit/summary",
             "audit_export": "/audit/export",
+            "metrics": "/metrics",
             "docs": "/docs",
         },
         "tools": get_registry().list_tool_names(),

@@ -6,19 +6,21 @@ Integrates with SSE streaming to request approvals from the frontend.
 
 Approval requests and their outcomes are persisted in the system of record,
 scoped to a workspace/project, so the audit trail survives restarts and never
-leaks across tenants. The in-process :class:`asyncio.Event` used to *wait* for a
-decision is necessarily process-local; resolving an approval from a different
-worker still requires a shared signal (tracked as a follow-up).
+leaks across tenants. A waiting process no longer depends on an in-process
+signal: decisions are published on a shared event bus (Redis pub/sub) and the
+waiter also polls the system of record, so a decision made on *any* replica is
+observed by the process that is blocked on it.
 """
 
 import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from config.settings import get_settings
 from models.approval import ApprovalEvent, ApprovalRequest, ApprovalResponse
+from shared.events import event_channel, get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +47,21 @@ class ApprovalGuard:
         "schema_change": "high",
     }
 
-    def __init__(self, timeout_seconds: int = 300):
+    def __init__(self, timeout_seconds: int = 300, poll_interval_seconds: Optional[float] = None):
         """
         Initialize the approval guard.
 
         Args:
             timeout_seconds: Default timeout for approval requests (default: 5 minutes)
+            poll_interval_seconds: How often to re-check the system of record for
+                a decision while waiting (safety net for missed pub/sub)
         """
         self.timeout_seconds = timeout_seconds
+        self.poll_interval_seconds = (
+            poll_interval_seconds
+            if poll_interval_seconds is not None
+            else get_settings().approval_poll_interval_seconds
+        )
 
         # In-flight approvals for this process (needed to wait on decisions).
         self.pending_approvals: Dict[str, ApprovalRequest] = {}
@@ -122,31 +131,14 @@ class ApprovalGuard:
         await self._emit_approval_request(request)
         logger.info(f"[PENDING] Approval requested: {approval_id} for {action_type}")
 
-        try:
-            await asyncio.wait_for(
-                self.approval_events[approval_id].wait(), timeout=request.timeout_seconds
-            )
-        except asyncio.TimeoutError:
+        response, status = await self._await_decision(request)
+        self._finish(request, status=status, response=response)
+        if status == "timeout":
             logger.warning(f"[TIMEOUT] Approval timeout: {approval_id}")
-            response = ApprovalResponse(
-                approval_id=approval_id,
-                approved=False,
-                reason=f"Approval timeout after {request.timeout_seconds} seconds",
+        else:
+            logger.info(
+                f"[OK] Approval {'granted' if response.approved else 'denied'}: {approval_id}"
             )
-            self._finish(request, status="timeout", response=response)
-            return response
-
-        response = self.approval_responses.get(approval_id)
-        if not response:
-            logger.error(f"[ERROR] Approval response missing: {approval_id}")
-            response = ApprovalResponse(
-                approval_id=approval_id,
-                approved=False,
-                reason="Internal error: approval response not found",
-            )
-
-        self._finish(request, status="approved" if response.approved else "rejected", response=response)
-        logger.info(f"[OK] Approval {'granted' if response.approved else 'denied'}: {approval_id}")
         return response
 
     async def respond_to_approval(
@@ -157,23 +149,35 @@ class ApprovalGuard:
         reason: Optional[str] = None,
     ) -> bool:
         """
-        Handle an approval response from the frontend.
+        Record an approval decision and wake the waiter, on *any* replica.
 
-        Returns True if a waiting request was signalled.
+        The decision is persisted and published on the shared event bus, so a
+        process blocked on this approval — even on a different replica — is
+        released. Returns True if the decision was recorded.
         """
-        if approval_id not in self.approval_events:
-            logger.warning(f"[WARN] Approval not found or already processed: {approval_id}")
-            return False
-
-        self.approval_responses[approval_id] = ApprovalResponse(
+        response = ApprovalResponse(
             approval_id=approval_id,
             approved=approved,
             user=user,
             reason=reason,
         )
-        self.approval_events[approval_id].set()
-        logger.info(f"[OK] Approval response recorded: {approval_id} - {approved}")
-        return True
+
+        signalled = False
+        event = self.approval_events.get(approval_id)
+        if event is not None:
+            self.approval_responses[approval_id] = response
+            event.set()
+            signalled = True
+
+        persisted = self._persist_decision(approval_id, response)
+        await self._publish_decision(approval_id, response)
+
+        if signalled or persisted:
+            logger.info(f"[OK] Approval response recorded: {approval_id} - {approved}")
+            return True
+
+        logger.warning(f"[WARN] Approval not found or already processed: {approval_id}")
+        return False
 
     def list_pending_approvals(self, project_id: Optional[str] = None) -> List[ApprovalRequest]:
         """List pending approvals, optionally scoped to a project."""
@@ -251,6 +255,10 @@ class ApprovalGuard:
         try:
             from db import repositories
 
+            try:
+                duration = (response.timestamp - request.created_at).total_seconds()
+            except Exception:
+                duration = None
             repositories.resolve_approval(
                 request.approval_id,
                 status=status,
@@ -258,10 +266,125 @@ class ApprovalGuard:
                 user=response.user,
                 reason=response.reason,
                 responded_at=response.timestamp,
-                duration_seconds=(response.timestamp - request.created_at).total_seconds(),
+                duration_seconds=duration,
             )
         except Exception as e:
             logger.warning(f"Could not persist approval decision: {e}")
+
+    # ── Cross-replica decision waiting ────────────────────────────────
+
+    async def _await_decision(self, request: ApprovalRequest) -> Tuple[ApprovalResponse, str]:
+        """Wait for a decision from the event bus, polling the DB as a safety net.
+
+        Subscribing *before* checking the database closes the race where a
+        decision lands between the check and the subscription.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + request.timeout_seconds
+        interval = max(0.05, self.poll_interval_seconds)
+        channel = event_channel("approval", request.approval_id)
+        bus = get_event_bus()
+
+        async with bus.subscribe(channel) as queue:
+            existing = self._load_decision(request.approval_id)
+            if existing is not None:
+                return existing, self._status_for(existing)
+
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return self._timeout_response(request), "timeout"
+
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=min(interval, remaining))
+                except asyncio.TimeoutError:
+                    existing = self._load_decision(request.approval_id)
+                    if existing is not None:
+                        return existing, self._status_for(existing)
+                    continue
+
+                if message.get("approval_id") != request.approval_id:
+                    continue
+                response = ApprovalResponse(
+                    approval_id=request.approval_id,
+                    approved=bool(message.get("approved")),
+                    user=message.get("user"),
+                    reason=message.get("reason"),
+                )
+                return response, self._status_for(response)
+
+    def _load_decision(self, approval_id: str) -> Optional[ApprovalResponse]:
+        """Read a decided approval from the system of record."""
+        try:
+            from db import repositories
+
+            row = repositories.get_approval(approval_id)
+        except Exception as e:
+            logger.debug(f"Could not read approval decision: {e}")
+            return None
+
+        if not row or row.get("status") == "pending":
+            return None
+        return ApprovalResponse(
+            approval_id=approval_id,
+            approved=bool(row.get("approved")),
+            user=row.get("user"),
+            reason=row.get("reason"),
+        )
+
+    def _persist_decision(self, approval_id: str, response: ApprovalResponse) -> bool:
+        """Record a decision in the system of record; returns False if unknown."""
+        try:
+            from db import repositories
+
+            created_at = (repositories.get_approval(approval_id) or {}).get("created_at")
+            duration: Optional[float] = None
+            if created_at is not None:
+                try:
+                    duration = (response.timestamp - created_at).total_seconds()
+                except Exception:
+                    duration = None
+
+            return repositories.resolve_approval(
+                approval_id,
+                status="approved" if response.approved else "rejected",
+                approved=response.approved,
+                user=response.user,
+                reason=response.reason,
+                responded_at=response.timestamp,
+                duration_seconds=duration,
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist approval decision: {e}")
+            return False
+
+    async def _publish_decision(self, approval_id: str, response: ApprovalResponse) -> None:
+        """Broadcast a decision so waiters on every replica wake up."""
+        try:
+            await get_event_bus().publish(
+                event_channel("approval", approval_id),
+                {
+                    "approval_id": approval_id,
+                    "approved": response.approved,
+                    "user": response.user,
+                    "reason": response.reason,
+                    "timestamp": response.timestamp.isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Could not publish approval decision: {e}")
+
+    @staticmethod
+    def _status_for(response: ApprovalResponse) -> str:
+        return "approved" if response.approved else "rejected"
+
+    @staticmethod
+    def _timeout_response(request: ApprovalRequest) -> ApprovalResponse:
+        return ApprovalResponse(
+            approval_id=request.approval_id,
+            approved=False,
+            reason=f"Approval timeout after {request.timeout_seconds} seconds",
+        )
 
     async def _emit_approval_request(self, request: ApprovalRequest):
         """Emit an SSE event for the approval request."""

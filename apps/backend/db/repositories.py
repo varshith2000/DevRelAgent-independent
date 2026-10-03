@@ -271,6 +271,26 @@ def resolve_approval(
         session.close()
 
 
+def get_approval(approval_id: str) -> Optional[Dict[str, Any]]:
+    """Return one approval's decision state, or None if unknown."""
+    session = _new_session()
+    try:
+        record = session.get(ApprovalRecord, approval_id)
+        if record is None:
+            return None
+        return {
+            "approval_id": record.id,
+            "status": record.status,
+            "approved": record.approved,
+            "user": record.user,
+            "reason": record.reason,
+            "responded_at": record.responded_at,
+            "created_at": record.created_at,
+        }
+    finally:
+        session.close()
+
+
 def list_pending_approvals(project_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return pending approvals, optionally scoped to a project."""
     session = _new_session()

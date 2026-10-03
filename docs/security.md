@@ -189,8 +189,9 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Shared, tenant-scoped limits**: rate-limit windows, token budgets and
   circuit breakers live in a shared state backend and are keyed per project, so
   every replica enforces the same limits
-- **Remaining gap**: an approval decision must be resolved by the process that
-  is waiting for it (the in-process signal is not yet shared via pub/sub)
+- **Cross-replica approvals**: a decision recorded on any replica is published
+  on a shared event bus (Redis pub/sub) and polled from the system of record,
+  so the waiting process is released even if pub/sub is unavailable
 
 #### **API Security**
 - **CORS Configuration**: Controlled cross-origin access
@@ -246,7 +247,6 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 ### Known Gaps
 
-- **Approval decisions are not yet resolvable across worker processes** (the waiting signal is in-process; the records themselves are durable)
 - **`AUTH_PROVIDER=dev` trusts caller-supplied headers** and must never face an untrusted network
 - **No configurable retention or right-to-erasure tooling**
 - **No encryption-at-rest story** for stored audit files

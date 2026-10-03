@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # ── Human-in-the-loop ─────────────────────────────────────────────────
     # How long an approval request waits for a decision before auto-rejecting.
     approval_timeout_seconds: int = 300
+    # Safety-net poll interval: how often a waiting process re-checks the
+    # system of record for a decision that pub/sub may have missed (Phase 6).
+    approval_poll_interval_seconds: float = 2.0
 
     # ── HTTP edge rate limiting (Phase 4) ─────────────────────────────────
     # A coarse per-client limit in front of every endpoint, enforced through

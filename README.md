@@ -284,6 +284,11 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
 `GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`,
 `GET/POST/DELETE /projects/{id}/api-keys`, `GET /audit/verify`, and `GET /metrics`.
 
+**Frontend pages**: `/` (chat), `/dashboard` (live activity), `/approvals`
+(review and respond to pending approvals, with recent-decision history), and
+`/workspace` (workspace + members, project lifecycle, and project API keys).
+Each page shares the same header, project switcher and navigation.
+
 ### Deployment Considerations
 
 - **Multi-tenant (Phase 1)**: workspace/project isolation is enforced in the

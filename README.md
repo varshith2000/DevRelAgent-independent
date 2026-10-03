@@ -275,10 +275,14 @@ confined to it.
 - **Edge rate limiting** puts a coarse, per-project/identity request budget in
   front of every endpoint, shared across replicas, returning `429` with a
   `Retry-After` header when exceeded.
+- **Observability** assigns a request id and W3C `traceparent` to every request
+  (echoed back in the response headers and included in the JSON logs), records
+  HTTP latency/summary metrics, and exposes them in Prometheus text format at
+  `GET /metrics`.
 
 Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/members`,
 `GET/POST /projects`, `PATCH /projects/{id}`, `POST /projects/{id}/archive`,
-`GET/POST/DELETE /projects/{id}/api-keys`, and `GET /audit/verify`.
+`GET/POST/DELETE /projects/{id}/api-keys`, `GET /audit/verify`, and `GET /metrics`.
 
 ### Deployment Considerations
 
@@ -293,6 +297,10 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
   shared, per-project request budget, and audit entries are hash-chained per
   project so tampering is detectable. Note: the chain guards *stored* entries
   after the fact; it is not yet anchored to an external notary/witness.
+- **Observability (Phase 5)**: requests are correlated by request id and W3C
+  `traceparent` across replicas, logged as JSON with `request_id`/`trace_id`,
+  and measured via `GET /metrics` (Prometheus format). Trace spans are held in
+  memory per replica; exporting to a tracing backend is a follow-up.
 - **Not certified**: DevRelAgent holds no security certification and makes no
   compliance guarantee. It implements some controls that *support* compliance
   work (PII redaction, audit logging, approval gates); certification would

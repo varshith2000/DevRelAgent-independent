@@ -37,6 +37,12 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _metric_label(value: Any) -> str:
+    """Render an enum-or-string value as a bounded metric label."""
+    rendered = getattr(value, "value", value)
+    return str(rendered or "unknown")
+
+
 class AuditLogger:
     """
     Production-grade audit logger.
@@ -105,7 +111,7 @@ class AuditLogger:
                 self._cache.append(sanitized_entry)
                 # Trim cache if needed
                 if len(self._cache) > self.cache_size:
-                    self._cache = self._cache[-self.cache_size:]
+                    self._cache = self._cache[-self.cache_size :]
 
             # Persist to the system of record, scoped to the owning tenant.
             # tenant_id carries the active project id; workspace_id the workspace.
@@ -126,6 +132,18 @@ class AuditLogger:
             # Optionally write to ClickHouse
             if self.enable_clickhouse:
                 await self._write_to_clickhouse(sanitized_entry)
+
+            # Record metrics (Phase 5).
+            try:
+                from observability.metrics import get_metrics
+
+                get_metrics().counter(
+                    "devrel_audit_entries_total",
+                    "Total audit entries recorded",
+                    ("action_type",),
+                ).inc(labels={"action_type": _metric_label(entry.action_type)})
+            except Exception:  # metrics must never break logging
+                pass
 
             logger.debug(f"[OK] Logged audit entry: {entry.audit_id}")
             return True
@@ -361,7 +379,7 @@ class AuditLogger:
 
         try:
             # Append to file
-            with open(file_path, 'a', encoding='utf-8') as f:
+            with open(file_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry.model_dump()) + "\n")
         except Exception as e:
             logger.error(f"Failed to write to file {file_path}: {e}")
@@ -376,16 +394,14 @@ class AuditLogger:
             # Lazy load ClickHouse client
             if self._clickhouse_client is None:
                 from database.clickhouse_client import get_clickhouse_client
+
                 self._clickhouse_client = get_clickhouse_client()
 
             # Convert to dict and insert
             data = entry.model_dump()
 
             # Use async execution
-            await self._clickhouse_client.execute(
-                "INSERT INTO audit_trail (*) VALUES",
-                [data]
-            )
+            await self._clickhouse_client.execute("INSERT INTO audit_trail (*) VALUES", [data])
 
             logger.debug(f"[OK] Wrote audit entry to ClickHouse: {entry.audit_id}")
 
@@ -410,8 +426,14 @@ class AuditLogger:
 
         try:
             # Determine date range to scan
-            start_date = datetime.fromisoformat(filters.start_time) if filters.start_time else datetime.now() - timedelta(days=7)
-            end_date = datetime.fromisoformat(filters.end_time) if filters.end_time else datetime.now()
+            start_date = (
+                datetime.fromisoformat(filters.start_time)
+                if filters.start_time
+                else datetime.now() - timedelta(days=7)
+            )
+            end_date = (
+                datetime.fromisoformat(filters.end_time) if filters.end_time else datetime.now()
+            )
 
             # Scan audit files
             current_date = start_date.date()
@@ -419,12 +441,11 @@ class AuditLogger:
 
             while current_date <= end_date_only:
                 file_path = os.path.join(
-                    self.storage_path,
-                    f"audit_{current_date.strftime('%Y-%m-%d')}.jsonl"
+                    self.storage_path, f"audit_{current_date.strftime('%Y-%m-%d')}.jsonl"
                 )
 
                 if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, "r", encoding="utf-8") as f:
                         for line in f:
                             try:
                                 entry_data = json.loads(line.strip())
@@ -486,8 +507,7 @@ class AuditLogger:
         # Data source filter
         if filters.data_source:
             has_data_source = any(
-                da.source == filters.data_source
-                for da in entry.data_accessed or []
+                da.source == filters.data_source for da in entry.data_accessed or []
             )
             if not has_data_source:
                 return False
@@ -501,21 +521,14 @@ class AuditLogger:
         # Text search
         if filters.search_text:
             search_lower = filters.search_text.lower()
-            text_to_search = (
-                (entry.input_text or "") +
-                " " +
-                (entry.output_text or "")
-            ).lower()
+            text_to_search = ((entry.input_text or "") + " " + (entry.output_text or "")).lower()
             if search_lower not in text_to_search:
                 return False
 
         return True
 
     def _sort_results(
-        self,
-        results: List[AuditEntry],
-        sort_by: str,
-        sort_order: str
+        self, results: List[AuditEntry], sort_by: str, sort_order: str
     ) -> List[AuditEntry]:
         """Sort results by specified field."""
         reverse = sort_order == "desc"
@@ -525,10 +538,7 @@ class AuditLogger:
         elif sort_by == "action_type":
             results.sort(key=lambda e: e.action_type.value, reverse=reverse)
         elif sort_by == "tool_execution_time_ms":
-            results.sort(
-                key=lambda e: e.tool_execution_time_ms or 0,
-                reverse=reverse
-            )
+            results.sort(key=lambda e: e.tool_execution_time_ms or 0, reverse=reverse)
 
         return results
 
@@ -553,7 +563,7 @@ class AuditLogger:
         # Redact sensitive fields
         if sanitized.ip_address:
             # Partially redact IP
-            parts = sanitized.ip_address.split('.')
+            parts = sanitized.ip_address.split(".")
             if len(parts) == 4:
                 sanitized.ip_address = f"{parts[0]}.{parts[1]}.***.***"
 
@@ -563,10 +573,19 @@ class AuditLogger:
         """Recursively sanitize dictionary values."""
         sanitized = {}
         sensitive_keys = [
-            "password", "passwd", "pwd",
-            "token", "api_key", "apikey", "api-key",
-            "secret", "private_key", "private-key",
-            "auth", "credential", "session_token"
+            "password",
+            "passwd",
+            "pwd",
+            "token",
+            "api_key",
+            "apikey",
+            "api-key",
+            "secret",
+            "private_key",
+            "private-key",
+            "auth",
+            "credential",
+            "session_token",
         ]
 
         for key, value in data.items():
@@ -579,8 +598,7 @@ class AuditLogger:
                 sanitized[key] = self._sanitize_dict(value)
             elif isinstance(value, list):
                 sanitized[key] = [
-                    self._sanitize_dict(v) if isinstance(v, dict) else v
-                    for v in value
+                    self._sanitize_dict(v) if isinstance(v, dict) else v for v in value
                 ]
             elif isinstance(value, str) and len(value) > 2000:
                 # Truncate long strings
@@ -599,7 +617,7 @@ class AuditLogger:
         filename = f"audit_export_{session_id}_{timestamp}.json"
         file_path = os.path.join(export_dir, filename)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump([e.model_dump() for e in entries], f, indent=2, default=str)
 
         logger.info(f"[OK] Exported {len(entries)} entries to {file_path}")
@@ -615,47 +633,64 @@ class AuditLogger:
         file_path = os.path.join(export_dir, filename)
 
         # Flatten entries for CSV
-        with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
             if not entries:
                 return file_path
 
             # Get all fields from first entry
-            writer = csv.DictWriter(f, fieldnames=[
-                "audit_id", "timestamp", "session_id", "user_id",
-                "action_type", "action_name", "tool_name",
-                "input_text", "output_text",
-                "tool_success", "approval_decision",
-                "guardrail_result", "error_type", "error_message"
-            ])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "audit_id",
+                    "timestamp",
+                    "session_id",
+                    "user_id",
+                    "action_type",
+                    "action_name",
+                    "tool_name",
+                    "input_text",
+                    "output_text",
+                    "tool_success",
+                    "approval_decision",
+                    "guardrail_result",
+                    "error_type",
+                    "error_message",
+                ],
+            )
 
             writer.writeheader()
 
             for entry in entries:
-                writer.writerow({
-                    "audit_id": entry.audit_id,
-                    "timestamp": entry.timestamp,
-                    "session_id": entry.session_id,
-                    "user_id": entry.user_id or "",
-                    "action_type": entry.action_type.value,
-                    "action_name": entry.action_name or "",
-                    "tool_name": entry.tool_name or "",
-                    "input_text": (entry.input_text or "")[:1000],
-                    "output_text": (entry.output_text or "")[:1000],
-                    "tool_success": entry.tool_success if entry.tool_success is not None else "",
-                    "approval_decision": entry.approval_decision.value if entry.approval_decision else "",
-                    "guardrail_result": entry.guardrail_result.value if entry.guardrail_result else "",
-                    "error_type": entry.error_type or "",
-                    "error_message": (entry.error_message or "")[:500],
-                })
+                writer.writerow(
+                    {
+                        "audit_id": entry.audit_id,
+                        "timestamp": entry.timestamp,
+                        "session_id": entry.session_id,
+                        "user_id": entry.user_id or "",
+                        "action_type": entry.action_type.value,
+                        "action_name": entry.action_name or "",
+                        "tool_name": entry.tool_name or "",
+                        "input_text": (entry.input_text or "")[:1000],
+                        "output_text": (entry.output_text or "")[:1000],
+                        "tool_success": (
+                            entry.tool_success if entry.tool_success is not None else ""
+                        ),
+                        "approval_decision": (
+                            entry.approval_decision.value if entry.approval_decision else ""
+                        ),
+                        "guardrail_result": (
+                            entry.guardrail_result.value if entry.guardrail_result else ""
+                        ),
+                        "error_type": entry.error_type or "",
+                        "error_message": (entry.error_message or "")[:500],
+                    }
+                )
 
         logger.info(f"[OK] Exported {len(entries)} entries to {file_path}")
         return file_path
 
     def _calculate_summary(
-        self,
-        entries: List[AuditEntry],
-        start_time: str,
-        end_time: str
+        self, entries: List[AuditEntry], start_time: str, end_time: str
     ) -> AuditSummary:
         """Calculate summary statistics from entries."""
         summary = AuditSummary(
@@ -721,7 +756,9 @@ class AuditLogger:
             # Error statistics
             if entry.error_type:
                 summary.error_count += 1
-                summary.by_error_type[entry.error_type] = summary.by_error_type.get(entry.error_type, 0) + 1
+                summary.by_error_type[entry.error_type] = (
+                    summary.by_error_type.get(entry.error_type, 0) + 1
+                )
 
         # Calculate derived metrics
         summary.total_sessions = len(sessions)
@@ -743,7 +780,9 @@ class AuditLogger:
 
         summary.top_sessions = [
             {"session_id": sid, "entry_count": count}
-            for sid, count in sorted(session_activity.items(), key=lambda x: x[1], reverse=True)[:10]
+            for sid, count in sorted(session_activity.items(), key=lambda x: x[1], reverse=True)[
+                :10
+            ]
         ]
 
         return summary

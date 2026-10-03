@@ -119,6 +119,7 @@ files = [
     "apps/backend/auth",
     "apps/backend/sessions",
     "apps/backend/shared",
+    "apps/backend/observability",
 ]
 ignore_missing_imports = true
 follow_imports = "silent"

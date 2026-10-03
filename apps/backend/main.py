@@ -242,15 +242,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend dev server
+# CORS — allow local frontend dev servers and common localhost variants.
+# Keep the explicit list for clarity while allowing regex-based matches for
+# browser-origin variations like 127.0.0.1 and other local loopback hosts.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # Next.js
+        "http://localhost:3001",
         "http://localhost:5173",  # Vite
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "http://127.0.0.1:5173",
+        "http://0.0.0.0:3000",
+        "http://0.0.0.0:3001",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

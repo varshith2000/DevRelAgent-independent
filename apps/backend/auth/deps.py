@@ -22,6 +22,7 @@ from db.models import ApiKey, Membership, Project, User, Workspace, slugify, utc
 from db.session import get_session
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth.api_keys import resolve_api_key
@@ -78,20 +79,37 @@ def _unique_slug(session: Session, model, base: str, workspace_id: Optional[str]
 
 
 def _upsert_user(session: Session, principal: Principal) -> User:
-    """Find or create the user for this principal, refreshing last login."""
-    user = session.scalar(select(User).where(User.email == principal.email))
-    if user is None:
-        user = User(email=principal.email, name=principal.name, external_id=principal.subject)
-        session.add(user)
-        logger.info("Provisioned user %s", principal.email)
-    else:
+    """Find or create the user for this principal, refreshing last login.
+
+    A concurrent request may attempt to insert the same email at the same moment;
+    in that case we rollback the failed write and reload the persisted row.
+    """
+    try:
+        user = session.scalar(select(User).where(User.email == principal.email))
+        if user is None:
+            user = User(email=principal.email, name=principal.name, external_id=principal.subject)
+            session.add(user)
+            logger.info("Provisioned user %s", principal.email)
+        else:
+            if principal.name and user.name != principal.name:
+                user.name = principal.name
+            if principal.subject and user.external_id != principal.subject:
+                user.external_id = principal.subject
+        user.last_login_at = utcnow()
+        session.flush()
+        return user
+    except IntegrityError:
+        session.rollback()
+        user = session.scalar(select(User).where(User.email == principal.email))
+        if user is None:
+            raise
         if principal.name and user.name != principal.name:
             user.name = principal.name
         if principal.subject and user.external_id != principal.subject:
             user.external_id = principal.subject
-    user.last_login_at = utcnow()
-    session.flush()
-    return user
+        user.last_login_at = utcnow()
+        session.flush()
+        return user
 
 
 def _resolve_workspace(session: Session, principal: Principal, user: User) -> tuple[Workspace, str]:

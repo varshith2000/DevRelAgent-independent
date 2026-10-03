@@ -49,6 +49,25 @@ def test_workspaces_are_isolated(api_client):
     assert all(p["id"] != created.json()["id"] for p in listed)
 
 
+def test_upsert_user_retries_after_unique_constraint():
+    from unittest.mock import MagicMock
+
+    from auth.deps import _upsert_user
+    from sqlalchemy.exc import IntegrityError
+
+    principal = type("Principal", (), {"email": "dup@example.com", "name": "Dup User", "subject": "sub-dup"})()
+    existing = type("User", (), {"id": "u-dup", "email": "dup@example.com", "name": "Dup User", "external_id": "sub-dup", "last_login_at": None})()
+    session = MagicMock()
+
+    session.scalar.side_effect = [None, existing]
+    session.flush.side_effect = [IntegrityError("INSERT", {}, "UNIQUE constraint failed"), None]
+
+    result = _upsert_user(session, principal)
+
+    assert result is existing
+    assert session.rollback.called
+
+
 def test_cannot_read_another_workspaces_project(api_client):
     project = api_client.post(
         "/projects", json={"name": "Secret"}, headers={"X-Dev-Workspace": "ws-a"}

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -75,7 +76,10 @@ class Settings(BaseSettings):
     llm_model: str = "claude-haiku-4-5-20251001"
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    google_api_key: Optional[str] = None
+    google_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    )
     z_ai_api_key: Optional[str] = None
 
     # ── System of record (Phase 1) ────────────────────────────────────────

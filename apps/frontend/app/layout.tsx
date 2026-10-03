@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { SetupGate } from "../components/SetupGate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DevRel Agent - AI-Powered Developer Relations",
-  description: "Your intelligent assistant for documentation search, log analysis, and issue diagnosis with file upload support.",
+  title: "DevRelAgent — Engineering Support Workspace",
+  description: "A self-hosted developer-support assistant for engineering questions, configured knowledge sources, and human-reviewed actions.",
 };
 
 export default function RootLayout({
@@ -27,7 +28,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <SetupGate>{children}</SetupGate>
       </body>
     </html>
   );

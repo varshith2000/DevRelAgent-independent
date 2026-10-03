@@ -19,6 +19,7 @@ export default function DashboardPage() {
     const fetchStatus = async () => {
       try {
         const response = await apiFetch('/dashboard/status');
+        if (!response.ok) throw new Error(`Dashboard status request failed (${response.status}).`);
         const data = await response.json();
         if (data.services) {
           setServiceStatus(data.services);
@@ -38,13 +39,13 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleInvestigate = (event: any) => {
-    const query = encodeURIComponent(`Investigate ${event.service} - ${event.message}`);
-    window.open(`/?q=${query}`, '_blank');
+  const handleInvestigate = (event: { service: string; message: string }) => {
+    const query = new URLSearchParams({ q: `Investigate ${event.service} - ${event.message}` });
+    window.location.assign(`/?${query.toString()}`);
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="app-page-frame">
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}

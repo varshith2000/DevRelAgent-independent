@@ -50,6 +50,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const canAdmin = workspace?.role === 'owner' || workspace?.role === 'admin';
+  const canCreateProject = workspace?.role === 'owner';
 
   const loadBase = useCallback(async () => {
     try {
@@ -73,7 +74,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
       const current =
         projectList.find((project) => project.id === stored?.id) ?? projectList[0] ?? null;
       setActiveId(current?.id ?? null);
-      if (current) setProject(toProjectRef(current));
+      setProject(current ? toProjectRef(current) : null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workspace');
@@ -97,8 +98,9 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   }, [loadBase]);
 
   useEffect(() => {
-    if (activeId) void loadKeys(activeId);
-  }, [activeId, loadKeys]);
+    if (activeId && canAdmin) void loadKeys(activeId);
+    else setKeys([]);
+  }, [activeId, canAdmin, loadKeys]);
 
   const selectProject = (project: Project) => {
     setActiveId(project.id);
@@ -109,6 +111,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   const createProject = async () => {
     if (!newProjectName.trim()) return;
     setBusy(true);
+    setError(null);
     try {
       const response = await apiFetch('/projects', {
         method: 'POST',
@@ -128,7 +131,9 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   };
 
   const archiveProject = async (project: Project) => {
+    if (!window.confirm(`Archive “${project.name}”? It will disappear from active project selectors.`)) return;
     setBusy(true);
+    setError(null);
     try {
       const response = await apiFetch(`/projects/${project.id}/archive`, { method: 'POST' });
       if (!response.ok) throw new Error(`archive failed (${response.status})`);
@@ -143,6 +148,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   const createKey = async () => {
     if (!activeId || !newKeyName.trim()) return;
     setBusy(true);
+    setError(null);
     try {
       const response = await apiFetch(`/projects/${activeId}/api-keys`, {
         method: 'POST',
@@ -164,6 +170,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   const revokeKey = async (keyId: string) => {
     if (!activeId) return;
     setBusy(true);
+    setError(null);
     try {
       const response = await apiFetch(`/projects/${activeId}/api-keys/${keyId}`, {
         method: 'DELETE',
@@ -180,7 +187,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
   const activeProject = projects.find((project) => project.id === activeId) ?? null;
 
   return (
-    <div className={`flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 ${className}`}>
+    <div className={`workspace-admin-shell ${className}`}>
       <div className="px-6 py-6 space-y-6 max-w-5xl">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Workspace</h2>
@@ -244,7 +251,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
         <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
           <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Projects</h3>
 
-          {canAdmin && (
+          {canCreateProject && (
             <div className="flex items-center space-x-2 mb-4">
               <input
                 value={newProjectName}

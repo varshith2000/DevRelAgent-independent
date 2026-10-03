@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { Activity, Bot, Building2, ShieldCheck } from 'lucide-react';
+import { Activity, Bot, Building2, ShieldCheck, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { ProjectSwitcher } from './ProjectSwitcher';
 
@@ -35,43 +35,38 @@ export function AppHeader({ active, title = 'DevRel Agent', subtitle }: AppHeade
   const router = useRouter();
 
   return (
-    <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
-            {subtitle && (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
-            )}
-          </div>
+    <header className="app-shell-header">
+      <div className="app-header-main">
+        <button className="app-brand" onClick={() => router.push('/')} aria-label="Open DevRelAgent chat">
+          <span className="app-brand-mark"><Activity size={18} strokeWidth={2.5} /></span>
+          <span className="app-brand-name">DevRel<span>Agent</span></span>
+        </button>
+        <div className="app-page-heading">
+          <h1>{title}</h1>
+          {subtitle && <p>{subtitle}</p>}
         </div>
-
-        <div className="flex items-center space-x-3">
-          <ProjectSwitcher />
-
-          <div className="flex items-center space-x-2 bg-gray-100 dark:bg-gray-900 rounded-lg p-1">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = tab.key === active;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => router.push(tab.href)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <div className="app-header-workspace"><ProjectSwitcher /></div>
       </div>
+      <nav className="app-primary-nav" aria-label="Main navigation">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = tab.key === active;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => router.push(tab.href)}
+              aria-current={isActive ? 'page' : undefined}
+              className={`app-nav-item ${isActive ? 'app-nav-item-active' : ''}`}
+            >
+              <Icon size={16} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+        <a className="app-nav-guide" href="/project-report" target="_blank" rel="noreferrer">
+          <Sparkles size={15} /><span>Guide</span>
+        </a>
+      </nav>
     </header>
   );
 }

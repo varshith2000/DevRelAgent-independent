@@ -83,7 +83,7 @@ class AuditLogger:
         self._cache_lock = asyncio.Lock()
 
         # ClickHouse client (lazy initialization)
-        self._clickhouse_client = None
+        self._clickhouse_client: Optional[Any] = None
 
         logger.info(f"[OK] AuditLogger initialized with storage_path={storage_path}")
 
@@ -528,7 +528,7 @@ class AuditLogger:
         return True
 
     def _sort_results(
-        self, results: List[AuditEntry], sort_by: str, sort_order: str
+        self, results: List[AuditEntry], sort_by: Optional[str], sort_order: str
     ) -> List[AuditEntry]:
         """Sort results by specified field."""
         reverse = sort_order == "desc"
@@ -571,7 +571,7 @@ class AuditLogger:
 
     def _sanitize_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Recursively sanitize dictionary values."""
-        sanitized = {}
+        sanitized: Dict[str, Any] = {}
         sensitive_keys = [
             "password",
             "passwd",
@@ -774,7 +774,7 @@ class AuditLogger:
             summary.error_rate = summary.error_count / summary.total_entries
 
         # Top sessions by activity
-        session_activity = {}
+        session_activity: Dict[str, int] = {}
         for entry in entries:
             session_activity[entry.session_id] = session_activity.get(entry.session_id, 0) + 1
 

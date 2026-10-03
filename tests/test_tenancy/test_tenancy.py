@@ -155,6 +155,57 @@ def test_api_keys_are_scoped_to_their_project(api_client):
     assert me["project_id"] == project["id"]
 
 
+def test_session_cleanup_is_admin_only_scoped_and_validated(api_client):
+    from datetime import datetime, timedelta
+
+    from models.schemas import SessionContext
+    from routes.chat import _session_key, save_session
+    from sessions.store import MemorySessionStore, reset_session_store
+
+    store = MemorySessionStore()
+    reset_session_store(store)
+
+    owner_headers = {
+        "X-Dev-Workspace": "cleanup-shared-ws",
+        "X-Dev-User-Email": "owner@cleanup.test",
+        "X-Dev-User-Name": "Owner",
+    }
+    owner_me = api_client.get("/auth/me", headers=owner_headers).json()
+    member_headers = {
+        **owner_headers,
+        "X-Dev-User-Email": "member@cleanup.test",
+        "X-Dev-User-Name": "Member",
+    }
+    member_me = api_client.get("/auth/me", headers=member_headers).json()
+    assert member_me["role"] == "member"
+
+    other_me = api_client.get(
+        "/auth/me",
+        headers={"X-Dev-Workspace": "cleanup-other-ws", "X-Dev-User-Email": "other@cleanup.test"},
+    ).json()
+    project_a = owner_me["project_id"]
+    project_b = other_me["project_id"]
+    save_session(project_a, SessionContext(
+        session_id="old-in-a", last_activity=datetime.now() - timedelta(hours=2)
+    ))
+    save_session(project_a, SessionContext(session_id="fresh-in-a"))
+    save_session(project_b, SessionContext(
+        session_id="old-in-b", last_activity=datetime.now() - timedelta(hours=2)
+    ))
+
+    denied = api_client.post("/chat/sessions/cleanup", headers=member_headers)
+    assert denied.status_code == 403
+    invalid_age = api_client.post("/chat/sessions/cleanup?max_age_minutes=0", headers=owner_headers)
+    assert invalid_age.status_code == 422
+
+    cleaned = api_client.post("/chat/sessions/cleanup?max_age_minutes=60", headers=owner_headers)
+    assert cleaned.status_code == 200
+    assert cleaned.json() == {"cleaned_count": 1, "remaining_count": 1}
+    assert store.get(_session_key(project_a, "old-in-a")) is None
+    assert store.get(_session_key(project_a, "fresh-in-a")) is not None
+    assert store.get(_session_key(project_b, "old-in-b")) is not None
+
+
 @pytest.mark.asyncio
 async def test_sessions_are_isolated_per_project(db_engine):
     from routes.chat import get_or_create_session, list_project_sessions, save_session

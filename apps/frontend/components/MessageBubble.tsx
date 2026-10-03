@@ -7,7 +7,6 @@ interface UploadedFile {
     name: string;
     type: string;
     size: number;
-    content: string;
 }
 
 interface Message {
@@ -28,10 +27,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     const isUser = message.type === 'user';
     const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-    const copyToClipboard = (code: string, id: string) => {
-        navigator.clipboard.writeText(code);
-        setCopiedCode(id);
-        setTimeout(() => setCopiedCode(null), 2000);
+    const copyToClipboard = async (code: string, id: string) => {
+        try {
+            await navigator.clipboard.writeText(code);
+            setCopiedCode(id);
+            window.setTimeout(() => setCopiedCode(null), 2000);
+        } catch {
+            setCopiedCode(null);
+        }
+    };
+
+    const formatFileSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
     const formatContent = (content: string) => {
@@ -81,6 +90,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         <div className="relative group">
                             {/* Copy button */}
                             <button
+                                type="button"
+                                aria-label={copiedCode === codeId ? 'Code copied' : `Copy ${part.language} code`}
                                 onClick={() => copyToClipboard(part.content, codeId)}
                                 className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded text-xs flex items-center space-x-1"
                             >
@@ -242,7 +253,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                                         <Icon className="w-4 h-4" />
                                         <span className="max-w-[200px] truncate">{file.name}</span>
                                         <span className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
-                                            {(file.size / 1024).toFixed(1)} KB
+                                            {formatFileSize(file.size)}
                                         </span>
                                     </div>
                                 );
@@ -253,7 +264,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     {/* Timestamp */}
                     <div className={`text-xs mt-1 ${isUser ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'
                         }`}>
-                        {message.timestamp.toLocaleTimeString()}
+                        {Number.isNaN(message.timestamp.getTime()) ? 'Time unavailable' : message.timestamp.toLocaleTimeString()}
                     </div>
                 </div>
             </div>

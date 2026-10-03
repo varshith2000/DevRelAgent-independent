@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from auth.deps import RequestContext, get_request_context
+from auth.deps import RequestContext, get_request_context, require_role
 from config.settings import get_settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -124,11 +124,12 @@ def list_project_sessions(project_id: str) -> List[SessionContext]:
     return sessions
 
 
-async def cleanup_old_sessions(max_age_minutes: int = 60):
-    """Delete sessions that have been idle for too long, across all projects."""
+async def cleanup_old_sessions(max_age_minutes: int = 60, scope_id: Optional[str] = None):
+    """Delete sessions idle too long, optionally restricted to one project/workspace."""
     store = get_session_store()
     now = datetime.now()
-    for key in store.keys(SESSION_PREFIX):
+    prefix = f"{SESSION_PREFIX}{scope_id}:" if scope_id else SESSION_PREFIX
+    for key in store.keys(prefix):
         raw = store.get(key)
         if not raw:
             continue
@@ -474,7 +475,8 @@ async def list_sessions(
 
 @router.post("/sessions/cleanup")
 async def cleanup_sessions(
-    max_age_minutes: int = Query(60, description="Maximum session age in minutes")
+    max_age_minutes: int = Query(60, ge=1, le=525600, description="Maximum session age in minutes"),
+    context: RequestContext = Depends(require_role("owner", "admin")),
 ) -> Dict[str, int]:
     """
     Manually trigger cleanup of old sessions.
@@ -486,9 +488,10 @@ async def cleanup_sessions(
         Count of cleaned up sessions
     """
     store = get_session_store()
-    before_count = len(store.keys(SESSION_PREFIX))
-    await cleanup_old_sessions(max_age_minutes)
-    after_count = len(store.keys(SESSION_PREFIX))
+    scope_prefix = f"{SESSION_PREFIX}{_scope_id(context)}:"
+    before_count = len(store.keys(scope_prefix))
+    await cleanup_old_sessions(max_age_minutes, _scope_id(context))
+    after_count = len(store.keys(scope_prefix))
 
     cleaned = before_count - after_count
 

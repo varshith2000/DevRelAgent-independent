@@ -29,6 +29,8 @@ export const DEFAULT_IDENTITY: Identity = {
 
 const IDENTITY_KEY = 'devrelagent.identity';
 const PROJECT_KEY = 'devrelagent.project';
+let memoryIdentity: Identity | null = null;
+let memoryProject: ProjectRef | null = null;
 
 /** Fired on window whenever the identity or project changes. */
 export const IDENTITY_EVENT = 'devrelagent:identity-changed';
@@ -43,15 +45,20 @@ export function getIdentity(): Identity {
     const raw = window.localStorage.getItem(IDENTITY_KEY);
     if (raw) return { ...DEFAULT_IDENTITY, ...(JSON.parse(raw) as Partial<Identity>) };
   } catch {
-    // Corrupt value: fall back to the default identity.
+    // Corrupt or blocked storage: fall back to this tab's in-memory identity.
   }
-  return DEFAULT_IDENTITY;
+  return memoryIdentity ?? DEFAULT_IDENTITY;
 }
 
 export function setIdentity(identity: Partial<Identity>): Identity {
   const next = { ...getIdentity(), ...identity };
+  memoryIdentity = next;
   if (isBrowser()) {
-    window.localStorage.setItem(IDENTITY_KEY, JSON.stringify(next));
+    try {
+      window.localStorage.setItem(IDENTITY_KEY, JSON.stringify(next));
+    } catch {
+      // The app can still be used for this tab if browser storage is unavailable.
+    }
     window.dispatchEvent(new Event(IDENTITY_EVENT));
   }
   return next;
@@ -61,18 +68,23 @@ export function getProject(): ProjectRef | null {
   if (!isBrowser()) return null;
   try {
     const raw = window.localStorage.getItem(PROJECT_KEY);
-    return raw ? (JSON.parse(raw) as ProjectRef) : null;
+    return raw ? (JSON.parse(raw) as ProjectRef) : memoryProject;
   } catch {
-    return null;
+    return memoryProject;
   }
 }
 
 export function setProject(project: ProjectRef | null): void {
+  memoryProject = project;
   if (!isBrowser()) return;
-  if (project) {
-    window.localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
-  } else {
-    window.localStorage.removeItem(PROJECT_KEY);
+  try {
+    if (project) {
+      window.localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
+    } else {
+      window.localStorage.removeItem(PROJECT_KEY);
+    }
+  } catch {
+    // Keep project selection usable in memory for the current request flow.
   }
   window.dispatchEvent(new Event(IDENTITY_EVENT));
 }

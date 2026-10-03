@@ -53,7 +53,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
             const data = JSON.parse(event.data);
 
             if (data.type === 'connected') {
-              console.log('Dashboard connected');
+              // Stream is live; the header indicator reflects the current connection state.
             } else if (data.type === 'ping') {
               // Keepalive, ignore
             } else if (data.type === 'system_status') {
@@ -70,7 +70,6 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
         };
 
         eventSource.onerror = (e) => {
-          console.error('EventSource error:', e);
           setIsConnected(false);
 
           // Reconnect after 5 seconds
@@ -84,8 +83,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
         };
 
       } catch (e) {
-        console.error('Failed to connect to dashboard stream:', e);
-        setError('Failed to connect to dashboard');
+        setError(e instanceof Error ? e.message : 'Failed to connect to dashboard');
       }
     };
 
@@ -93,8 +91,11 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
     // Initial fetch of recent alerts
     apiFetch('/dashboard/alerts?limit=20')
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => {
+        if (!res.ok) throw new Error(`Alert history request failed (${res.status}).`);
+        return res.json();
+      })
+      .then(async (data) => {
         if (data.alerts) {
           setEvents(data.alerts);
         }
@@ -114,6 +115,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
   const handleRefresh = useCallback(async () => {
     try {
       const response = await apiFetch('/dashboard/alerts?limit=20');
+      if (!response.ok) throw new Error(`Refresh failed (${response.status}).`);
       const data = await response.json();
       if (data.alerts) {
         setEvents(data.alerts);
@@ -128,8 +130,8 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
       onInvestigate(event);
     } else {
       // Default behavior: navigate to chat with investigation query
-      const query = encodeURIComponent(`Investigate ${event.service} - ${event.message}`);
-      window.open(`/?q=${query}`, '_blank');
+      const query = new URLSearchParams({ q: `Investigate ${event.service} - ${event.message}` });
+      window.location.assign(`/?${query.toString()}`);
     }
   }, [onInvestigate]);
 

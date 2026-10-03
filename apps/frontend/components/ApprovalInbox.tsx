@@ -59,6 +59,7 @@ export function ApprovalInbox({ className = '' }: { className?: string }) {
   const decide = useCallback(
     async (approvalId: string, approved: boolean) => {
       setBusyId(approvalId);
+      setError(null);
       try {
         const response = await apiFetch(`/approvals/${approvalId}`, {
           method: 'POST',
@@ -69,7 +70,11 @@ export function ApprovalInbox({ className = '' }: { className?: string }) {
             reason: reasons[approvalId] || undefined,
           }),
         });
-        if (!response.ok) throw new Error(`decision failed (${response.status})`);
+        if (!response.ok) {
+          let detail = `Decision failed (${response.status}).`;
+          try { const payload = await response.json(); if (typeof payload.detail === 'string') detail = payload.detail; } catch { /* Use status text. */ }
+          throw new Error(detail);
+        }
 
         setPending((current) => current.filter((item) => item.approval_id !== approvalId));
         setReasons((current) => {
@@ -80,6 +85,7 @@ export function ApprovalInbox({ className = '' }: { className?: string }) {
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to record decision');
+        await load();
       } finally {
         setBusyId(null);
       }
@@ -88,7 +94,7 @@ export function ApprovalInbox({ className = '' }: { className?: string }) {
   );
 
   return (
-    <div className={`flex flex-col ${className}`}>
+    <div className={`approval-inbox-shell ${className}`}>
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center space-x-2">
           <ShieldCheck className="w-5 h-5 text-gray-600 dark:text-gray-400" />

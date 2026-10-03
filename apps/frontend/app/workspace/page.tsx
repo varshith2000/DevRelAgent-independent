@@ -6,7 +6,7 @@ import { WorkspaceAdmin } from '../../components/WorkspaceAdmin';
 
 export default function WorkspacePage() {
   return (
-    <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="app-page-frame">
       <AppHeader
         active="workspace"
         title="Workspace"

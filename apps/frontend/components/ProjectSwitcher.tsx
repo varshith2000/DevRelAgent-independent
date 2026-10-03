@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, FolderCog, RefreshCw } from 'lucide-react';
+import { Building2, FolderCog, RefreshCw, CircleAlert } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import {
   getIdentity,
@@ -115,8 +115,10 @@ export function ProjectSwitcher() {
           </select>
         </div>
       </div>
+      {error && <span role="status" className="sr-only">{error}</span>}
       <button
         onClick={() => void load()}
+        aria-label={error ? `Project list error: ${error}` : 'Refresh projects'}
         title={error ?? 'Refresh projects'}
         className={`p-1 rounded transition-colors ${
           error
@@ -124,7 +126,7 @@ export function ProjectSwitcher() {
             : 'text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
         }`}
       >
-        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+        {error ? <CircleAlert className="w-3.5 h-3.5" /> : <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
       </button>
     </div>
   );

@@ -94,6 +94,7 @@ def db_engine(tmp_path, monkeypatch):
     from observability.metrics import reset_metrics
     from observability.tracing import reset_tracer
     from sessions.store import MemorySessionStore, reset_session_store
+    from shared.events import MemoryEventBus, reset_event_bus
     from shared.state import MemorySharedState, reset_shared_state
 
     reset_engine(engine)
@@ -102,6 +103,7 @@ def db_engine(tmp_path, monkeypatch):
     # Fresh shared state per test: HTTP edge limits and guardrail counters must
     # never accumulate across tests.
     reset_shared_state(MemorySharedState())
+    reset_event_bus(MemoryEventBus())
     reset_metrics()
     reset_tracer()
     yield engine
@@ -110,6 +112,7 @@ def db_engine(tmp_path, monkeypatch):
     reset_auth_provider()
     reset_session_store(None)
     reset_shared_state(None)
+    reset_event_bus(None)
     reset_metrics()
     reset_tracer(None)
     engine.dispose()

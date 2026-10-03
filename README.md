@@ -288,8 +288,10 @@ Endpoints: `GET /auth/me`, `GET/POST /workspaces`, `GET /workspaces/current/memb
 
 - **Multi-tenant (Phase 1)**: workspace/project isolation is enforced in the
   backend, and audit entries plus approval decisions are durable and scoped per
-  project. Remaining gap: an approval decision must be resolved by the process
-  waiting on it (the signal is in-process).
+  project.
+- **Cross-replica approvals (Phase 6)**: an approval decision recorded on any
+  replica is published on a shared event bus and also polled from the system of
+  record, so the process blocked on it is released even if pub/sub is down.
 - **Shared limits (Phase 3)**: rate-limit windows, token budgets and circuit
   breakers are shared across replicas and scoped per project, so limits hold
   under horizontal scaling instead of being enforced independently per process.

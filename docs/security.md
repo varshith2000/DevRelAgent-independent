@@ -183,6 +183,9 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 - **Audit Attribution**: actions attributed to a session and user
 - **Durable, tenant-scoped records**: audit entries and approval decisions are
   persisted per project and survive restarts; reads are always scoped
+- **Tamper-evident audit**: audit entries are hash-chained per project, so an
+  edit, deletion or reordering of a stored entry is detectable via
+  `GET /audit/verify`
 - **Shared, tenant-scoped limits**: rate-limit windows, token budgets and
   circuit breakers live in a shared state backend and are keyed per project, so
   every replica enforces the same limits
@@ -191,11 +194,13 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 #### **API Security**
 - **CORS Configuration**: Controlled cross-origin access
-- **Rate Limiting**: Tool-level limits exist; no HTTP edge limit yet
+- **Rate Limiting**: An HTTP edge limit in front of every endpoint, plus the
+  deeper tool/action limits; all shared across replicas and scoped per project
 - **Input Validation**: All API inputs validated (Pydantic)
 - **Error Handling**: Validation errors are returned without internal details
 - **Authentication**: required on all data endpoints (401 without valid credentials)
-- **Remaining gap**: no HTTP edge rate limiting yet (tool-level limits exist)
+- **Remaining gap**: the edge limit is a coarse per-client budget, not a
+  per-route or per-plan quota
 
 ### Threat Mitigation
 
@@ -241,13 +246,14 @@ Tool Request → Risk Assessment → Approval Required? → Yes: Request Approva
 
 - **Approval decisions are not yet resolvable across worker processes** (the waiting signal is in-process; the records themselves are durable)
 - **`AUTH_PROVIDER=dev` trusts caller-supplied headers** and must never face an untrusted network
-- **No tamper-evident / hash-chained audit log**
 - **No configurable retention or right-to-erasure tooling**
 - **No encryption-at-rest story** for stored audit files
-- **No HTTP edge rate limiting**
+- **Audit chain is not externally anchored**: the hash chain detects tampering
+  after the fact but is not yet notarised to an external witness
 
 #### **Audit Features**
 - **Append-only files**: JSONL audit trail
+- **Tamper-evident chain**: per-project hash chain verified via `GET /audit/verify`
 - **Export & Reporting**: JSON/CSV export capabilities
 
 ### Governance Controls

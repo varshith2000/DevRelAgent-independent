@@ -28,9 +28,7 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 # Router
-router = APIRouter(
-    prefix="/audit", tags=["audit"], dependencies=[Depends(get_request_context)]
-)
+router = APIRouter(prefix="/audit", tags=["audit"], dependencies=[Depends(get_request_context)])
 
 
 def _project_id(context: RequestContext) -> Optional[str]:
@@ -114,8 +112,7 @@ async def get_session_audit_trail(
     except Exception as e:
         logger.error(f"Failed to retrieve session audit trail: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve session audit trail: {str(e)}"
+            status_code=500, detail=f"Failed to retrieve session audit trail: {str(e)}"
         )
 
 
@@ -170,13 +167,9 @@ async def query_audit_trail(
 @router.get("/summary", response_model=AuditSummary)
 async def get_audit_summary(
     start_time: Optional[str] = Query(
-        None,
-        description="Start time (ISO format), defaults to 24 hours ago"
+        None, description="Start time (ISO format), defaults to 24 hours ago"
     ),
-    end_time: Optional[str] = Query(
-        None,
-        description="End time (ISO format), defaults to now"
-    ),
+    end_time: Optional[str] = Query(None, description="End time (ISO format), defaults to now"),
     context: RequestContext = Depends(get_request_context),
 ) -> AuditSummary:
     """
@@ -222,6 +215,30 @@ async def get_audit_summary(
     except Exception as e:
         logger.error(f"Failed to generate summary: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+
+
+@router.get("/verify")
+async def verify_audit_integrity(
+    context: RequestContext = Depends(get_request_context),
+) -> Dict[str, Any]:
+    """Verify the caller's audit hash chain and report the first break.
+
+    Recomputes every entry hash for this tenant's chain, so any edit, deletion
+    or reordering of a persisted audit row is detectable.
+    """
+    try:
+        from db import repositories
+
+        report = repositories.verify_audit_chain(
+            project_id=_project_id(context),
+            workspace_id=_workspace_id(context),
+        )
+        logger.info(f"Audit chain verification: ok={report['ok']} checked={report['checked']}")
+        return report
+
+    except Exception as e:
+        logger.error(f"Audit chain verification failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
 
 
 @router.post("/export")
@@ -406,7 +423,9 @@ async def get_audit_stats(
             stats["actions_by_type"][action_type] = stats["actions_by_type"].get(action_type, 0) + 1
 
             if entry.tool_name:
-                stats["tools_used"][entry.tool_name] = stats["tools_used"].get(entry.tool_name, 0) + 1
+                stats["tools_used"][entry.tool_name] = (
+                    stats["tools_used"].get(entry.tool_name, 0) + 1
+                )
 
             if entry.error_type:
                 stats["recent_errors"] += 1
@@ -447,7 +466,9 @@ async def audit_health(
         # Count audit files
         file_count = 0
         if storage_exists:
-            file_count = len([f for f in os.listdir(audit_logger.storage_path) if f.endswith(".jsonl")])
+            file_count = len(
+                [f for f in os.listdir(audit_logger.storage_path) if f.endswith(".jsonl")]
+            )
 
         return {
             "status": "healthy" if storage_exists else "unhealthy",

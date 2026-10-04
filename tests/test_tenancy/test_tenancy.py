@@ -55,8 +55,20 @@ def test_upsert_user_retries_after_unique_constraint():
     from auth.deps import _upsert_user
     from sqlalchemy.exc import IntegrityError
 
-    principal = type("Principal", (), {"email": "dup@example.com", "name": "Dup User", "subject": "sub-dup"})()
-    existing = type("User", (), {"id": "u-dup", "email": "dup@example.com", "name": "Dup User", "external_id": "sub-dup", "last_login_at": None})()
+    principal = type(
+        "Principal", (), {"email": "dup@example.com", "name": "Dup User", "subject": "sub-dup"}
+    )()
+    existing = type(
+        "User",
+        (),
+        {
+            "id": "u-dup",
+            "email": "dup@example.com",
+            "name": "Dup User",
+            "external_id": "sub-dup",
+            "last_login_at": None,
+        },
+    )()
     session = MagicMock()
 
     session.scalar.side_effect = [None, existing]
@@ -204,13 +216,15 @@ def test_session_cleanup_is_admin_only_scoped_and_validated(api_client):
     ).json()
     project_a = owner_me["project_id"]
     project_b = other_me["project_id"]
-    save_session(project_a, SessionContext(
-        session_id="old-in-a", last_activity=datetime.now() - timedelta(hours=2)
-    ))
+    save_session(
+        project_a,
+        SessionContext(session_id="old-in-a", last_activity=datetime.now() - timedelta(hours=2)),
+    )
     save_session(project_a, SessionContext(session_id="fresh-in-a"))
-    save_session(project_b, SessionContext(
-        session_id="old-in-b", last_activity=datetime.now() - timedelta(hours=2)
-    ))
+    save_session(
+        project_b,
+        SessionContext(session_id="old-in-b", last_activity=datetime.now() - timedelta(hours=2)),
+    )
 
     denied = api_client.post("/chat/sessions/cleanup", headers=member_headers)
     assert denied.status_code == 403

@@ -1,11 +1,11 @@
 "use client";
 
 import React from 'react';
-import { Activity, Bot, Building2, ShieldCheck, Sparkles } from 'lucide-react';
+import { Activity, BookOpen, Bot, Building2, ShieldCheck, Sparkles, GitBranch } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { ProjectSwitcher } from './ProjectSwitcher';
 
-export type TabKey = 'chat' | 'dashboard' | 'approvals' | 'workspace';
+export type TabKey = 'chat' | 'dashboard' | 'approvals' | 'workspace' | 'guide';
 
 interface Tab {
   key: TabKey;
@@ -19,6 +19,7 @@ const TABS: Tab[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: Activity },
   { key: 'approvals', label: 'Approvals', href: '/approvals', icon: ShieldCheck },
   { key: 'workspace', label: 'Workspace', href: '/workspace', icon: Building2 },
+  { key: 'guide', label: 'Guide', href: '/guide', icon: Sparkles },
 ];
 
 interface AppHeaderProps {
@@ -39,13 +40,14 @@ export function AppHeader({ active, title = 'DevRel Agent', subtitle }: AppHeade
       <div className="app-header-main">
         <button className="app-brand" onClick={() => router.push('/')} aria-label="Open DevRelAgent chat">
           <span className="app-brand-mark"><Activity size={18} strokeWidth={2.5} /></span>
-          <span className="app-brand-name">DevRel<span>Agent</span></span>
+          <span className="app-brand-lockup"><span className="app-brand-name">DEVREL<span>AGENT</span></span><span className="app-brand-edition">ENGINEERING INTELLIGENCE</span></span>
         </button>
         <div className="app-page-heading">
           <h1>{title}</h1>
           {subtitle && <p>{subtitle}</p>}
         </div>
         <div className="app-header-workspace"><ProjectSwitcher /></div>
+        <div className="app-header-meta"><span><GitBranch size={12} /> WORKSPACE / SCOPED</span><span className="app-header-meta-divider" /><span><ShieldCheck size={12} /> ACTIONS / REVIEW-GATED</span></div>
       </div>
       <nav className="app-primary-nav" aria-label="Main navigation">
         {TABS.map((tab) => {
@@ -63,8 +65,8 @@ export function AppHeader({ active, title = 'DevRel Agent', subtitle }: AppHeade
             </button>
           );
         })}
-        <a className="app-nav-guide" href="/project-report" target="_blank" rel="noreferrer">
-          <Sparkles size={15} /><span>Guide</span>
+        <a className="app-nav-guide app-nav-report" href="/project-report" target="_blank" rel="noreferrer">
+          <BookOpen size={15} /><span>Project report</span>
         </a>
       </nav>
     </header>

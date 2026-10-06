@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Paperclip, X, Plus, Clock, Trash2, FileText, Image, File, Activity, BookOpen, ShieldCheck, PanelLeftClose, PanelLeftOpen, Sparkles, ArrowUpRight, Command } from 'lucide-react';
+import { Send, Bot, Paperclip, X, Plus, Clock, Trash2, FileText, Image, File, Activity, BookOpen, ShieldCheck, PanelLeftClose, PanelLeftOpen, Sparkles, ArrowUpRight, Command, Network, Radio, TerminalSquare, Orbit, ChevronDown, Database } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { SqlSandbox } from './SqlSandbox';
 import { AppHeader } from './AppHeader';
@@ -74,12 +74,7 @@ function createWelcomeConversation(): Conversation {
     return {
         id: newSessionId(),
         title: 'New conversation',
-        messages: [{
-            id: newSessionId(),
-            type: 'assistant',
-            content: "Welcome to DevRelAgent. Ask engineering questions, investigate service issues, and review guarded actions. I can only use the tools and data sources configured by your administrator.\n\nWorkspace guide: open the Guide link in the header to see a full capability overview and setup checklist.",
-            timestamp: new Date(),
-        }],
+        messages: [],
         timestamp: new Date(),
     };
 }
@@ -104,6 +99,10 @@ export function FullChat() {
     // Restore history per workspace/project so switching tenant context never
     // carries a previous scope's locally cached conversations into the new one.
     useEffect(() => {
+        if (window.innerWidth <= 560) setSidebarOpen(false);
+    }, []);
+
+    useEffect(() => {
         const restoreForCurrentScope = (consumeDeepLink = false) => {
             const key = conversationStorageKey();
             if (storageKeyRef.current === key) return;
@@ -116,7 +115,14 @@ export function FullChat() {
                     if (!Array.isArray(parsed)) throw new Error('Saved chat history is not a list.');
                     const convs = parsed
                         .map(parseStoredConversation)
-                        .filter((conversation): conversation is Conversation => conversation !== null);
+                        .filter((conversation): conversation is Conversation => conversation !== null)
+                        .map((conversation) => {
+                            const onlyMessage = conversation.messages[0];
+                            if (conversation.messages.length === 1 && onlyMessage?.type === 'assistant' && onlyMessage.content.startsWith('Welcome to DevRelAgent.')) {
+                                return { ...conversation, messages: [] };
+                            }
+                            return conversation;
+                        });
                     if (convs.length > 0) {
                         setConversations(convs);
                         setCurrentConversationId(convs[0].id);
@@ -254,7 +260,7 @@ export function FullChat() {
         const updatedMessages = [...currentConv.messages, userMessage];
 
         // Update title if this is the first user message.
-        if (currentConv.messages.length === 1 && (inputValue.trim() || uploadedFiles.length > 0)) {
+        if (currentConv.messages.length === 0 && (inputValue.trim() || uploadedFiles.length > 0)) {
             updateConversationTitle(currentConv.id, inputValue.trim() || 'Selected file attachments');
         }
 
@@ -383,7 +389,7 @@ export function FullChat() {
 
     return (
         <div className="chat-app-shell">
-            <AppHeader active="chat" title="Chat" subtitle="Your engineering support workspace" />
+            <AppHeader active="chat" title="Command center" subtitle="Engineering intelligence · Live workspace" />
             <div className="chat-workspace-layout">
                 {/* Sidebar */}
                 {sidebarOpen && (
@@ -422,7 +428,7 @@ export function FullChat() {
                         ))}
                     </div>
                     {conversations.length === 0 && <p className="chat-sidebar-empty">Your conversations will appear here.</p>}
-                    <button type="button" className="chat-sidebar-guide" onClick={() => window.open('/project-report', '_blank', 'noopener,noreferrer')}><BookOpen size={15} /><span>Read the DevRelAgent guide</span></button>
+                    <button type="button" className="chat-sidebar-guide" onClick={() => window.open('/guide', '_blank', 'noopener,noreferrer')}><BookOpen size={15} /><span>Explore the product guide</span></button>
                     <div className="chat-sidebar-bottom"><ShieldCheck size={15} /><span>Review high-impact actions in Approvals</span></div>
                 </aside>
                 </>
@@ -435,26 +441,44 @@ export function FullChat() {
                             <button type="button" className="chat-sidebar-toggle" onClick={() => setSidebarOpen((open) => !open)} aria-label={sidebarOpen ? 'Hide conversations' : 'Show conversations'} aria-expanded={sidebarOpen}>
                                 {sidebarOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
                             </button>
-                            <div><h1>{currentConv?.title || 'New conversation'}</h1><p>Ask a question or describe an issue to investigate.</p></div>
+                            <div className="chat-title-copy"><div className="chat-title-overline"><span className="chat-title-live-dot" /> DEVREL AGENT <span className="chat-title-separator">/</span> ENGINEERING OPS</div><h1>{currentConv?.title || 'New conversation'}</h1><p>Ask a question or describe an issue to investigate.</p></div>
                         </div>
                         <div className="chat-heading-status">
-                            <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? 'API connected' : backendReady === false ? 'API offline' : 'Checking API'}</span>
-                            <span className="chat-scope-badge"><ShieldCheck size={13} /> Scoped to this project</span>
+                            <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? 'API CONNECTED' : backendReady === false ? 'API OFFLINE' : 'CONNECTING'}</span>
+                            <span className="chat-scope-badge"><ShieldCheck size={13} /> PROJECT SCOPE <ChevronDown size={12} /></span>
                         </div>
                     </div>
                     {/* Messages */}
-                    <div className={`chat-messages ${currentConv?.messages.length === 1 ? 'chat-messages-welcome' : ''}`}>
-                        {currentConv?.messages.length === 1 && (
+                    <div className={`chat-messages ${currentConv?.messages.length === 0 ? 'chat-messages-welcome' : ''}`}>
+                        {currentConv?.messages.length === 0 && (
                             <section className="chat-welcome-panel" aria-label="Start a conversation">
-                                <div className="chat-welcome-orb"><Sparkles size={20} /></div>
-                                <p className="chat-welcome-kicker">YOUR ENGINEERING COPILOT</p>
-                                <h2>What are you working on?</h2>
-                                <p className="chat-welcome-description">Ask a question, explore your codebase, or investigate a service issue. I’ll use the tools and project context available in this workspace.</p>
-                                <div className="chat-suggestion-grid">
-                                    <button type="button" onClick={() => setInputValue('Help me understand the architecture of this project.')}><span><BookOpen size={16} /></span><span><strong>Understand this project</strong><small>Explore architecture and key components</small></span><ArrowUpRight size={15} /></button>
-                                    <button type="button" onClick={() => setInputValue('Help me investigate a service issue and identify useful evidence.')}><span><Activity size={16} /></span><span><strong>Investigate an issue</strong><small>Trace symptoms to useful signals</small></span><ArrowUpRight size={15} /></button>
-                                    <button type="button" onClick={() => setInputValue('Help me find the right documentation for my question.')}><span><FileText size={16} /></span><span><strong>Find technical guidance</strong><small>Search configured docs and knowledge</small></span><ArrowUpRight size={15} /></button>
+                                <div className="chat-welcome-grid">
+                                <div className="chat-welcome-copy">
+                                    <p className="chat-welcome-kicker"><span /> DEVREL AGENT <span className="welcome-kicker-dash">/</span> INTELLIGENCE CORE</p>
+                                    <h2>Engineering,<br /><span>in full signal.</span></h2>
+                                    <p className="chat-welcome-description">Your operational copilot for understanding systems, tracing incidents, and moving from question to confident action.</p>
                                 </div>
+                                <div className="chat-system-preview" aria-label="DevRelAgent security model">
+                                    <div className="system-preview-header"><span><Activity size={13} /> SYSTEM TOPOLOGY</span><span className="system-preview-index">SYS / 01</span></div>
+                                    <div className="system-orbit-stage">
+                                        <span className="system-orbit system-orbit-a" /><span className="system-orbit system-orbit-b" />
+                                        <span className="system-node system-node-context"><Database size={13} /> CONTEXT</span>
+                                        <span className="system-node system-node-tools"><TerminalSquare size={13} /> TOOLS</span>
+                                        <span className="system-node system-node-approval"><ShieldCheck size={13} /> APPROVAL</span>
+                                        <span className="system-core"><Orbit size={20} /></span>
+                                    </div>
+                                    <div className="system-preview-divider" />
+                                    <div className="system-preview-row"><span>CONTEXT BOUNDARY</span><strong>PROJECT SCOPED</strong></div>
+                                    <div className="system-preview-row"><span>HIGH-IMPACT ACTIONS</span><strong>HUMAN REVIEW</strong></div>
+                                </div>
+                                </div>
+                                <div className="chat-command-label"><span>CHOOSE AN OPERATION</span><span>01 — 03</span></div>
+                                <div className="chat-suggestion-grid">
+                                    <button type="button" onClick={() => setInputValue('Help me understand the architecture of this project.')}><span className="suggestion-icon suggestion-icon-cyan"><Network size={17} /></span><span><strong>Map the system</strong><small>Understand architecture & dependencies</small></span><ArrowUpRight size={15} /></button>
+                                    <button type="button" onClick={() => setInputValue('Help me investigate a service issue and identify useful evidence.')}><span className="suggestion-icon suggestion-icon-amber"><Radio size={17} /></span><span><strong>Investigate a signal</strong><small>Trace an incident to its source</small></span><ArrowUpRight size={15} /></button>
+                                    <button type="button" onClick={() => setInputValue('Help me find the right documentation for my question.')}><span className="suggestion-icon suggestion-icon-violet"><TerminalSquare size={17} /></span><span><strong>Query the knowledge base</strong><small>Find precise technical guidance</small></span><ArrowUpRight size={15} /></button>
+                                </div>
+                                <div className="chat-safety-line"><ShieldCheck size={14} /><span>PROJECT-SCOPED CONTEXT</span><i /> <span>HIGH-IMPACT ACTIONS REQUIRE APPROVAL</span></div>
                             </section>
                         )}
                         <div className="chat-conversation-stream">

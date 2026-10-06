@@ -27,7 +27,7 @@ import { setSetupComplete } from '../lib/setup';
 
 const FLOW = [
   { title: 'Understand', description: 'What DevRelAgent does' },
-  { title: 'Your workspace', description: 'Choose your local identity' },
+  { title: 'Workspace', description: 'Choose your local identity' },
   { title: 'Connect', description: 'Check your backend' },
 ];
 
@@ -95,7 +95,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
           <span className="brand-mark"><Activity size={19} strokeWidth={2.5} /></span>
           <span>DevRel<span className="brand-muted">Agent</span></span>
         </a>
-        <a className="setup-report-link" href="/project-report" target="_blank" rel="noreferrer">
+        <a className="setup-report-link" href="/guide" target="_blank" rel="noreferrer">
           <BookOpen size={16} /> Project guide
         </a>
       </div>
@@ -216,7 +216,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
           <div className="setup-sidebar-card truth-card">
             <TriangleAlert size={17} /><p><strong>Know the boundaries.</strong> This is an actively developed, self-hosted prototype—not a certified support or incident-response system. Capabilities vary with configured tools and indexed data.</p>
           </div>
-          <a className="setup-full-guide" href="/project-report" target="_blank" rel="noreferrer">Read the full project report <ArrowRight size={15} /></a>
+          <a className="setup-full-guide" href="/guide" target="_blank" rel="noreferrer">Explore the full product guide <ArrowRight size={15} /></a>
         </aside>
       </div>
       <footer className="setup-footer"><span>DEVRELAGENT · SELF-HOSTED DEVELOPER SUPPORT</span><span>Built to make engineering context easier to explore.</span></footer>

@@ -68,7 +68,7 @@ export function ApprovalCard({
   };
 
   return (
-    <div className={`border-l-4 ${config.border} ${config.bg} rounded-lg p-6 shadow-lg ${className}`}>
+    <div className={`approval-card border-l-4 ${config.border} ${config.bg} rounded-lg p-6 shadow-lg ${className}`}>
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center space-x-3">

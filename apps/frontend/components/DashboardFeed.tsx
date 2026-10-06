@@ -69,8 +69,9 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
           }
         };
 
-        eventSource.onerror = (e) => {
+        eventSource.onerror = () => {
           setIsConnected(false);
+          setError('Live activity disconnected. Retrying shortly.');
 
           // Reconnect after 5 seconds
           if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -102,6 +103,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
       })
       .catch(e => {
         console.error('Failed to fetch initial alerts:', e);
+        setError(e instanceof Error ? e.message : 'Failed to load recent activity.');
       });
 
     return () => {
@@ -136,9 +138,9 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
   }, [onInvestigate]);
 
   return (
-    <div className={`flex flex-col ${className}`}>
+    <div className={`dashboard-feed flex flex-col ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+      <div className="dashboard-feed-header flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center space-x-2">
           <AlertCircle className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -146,7 +148,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
           </h2>
         </div>
         <div className="flex items-center space-x-3">
-          <div className={`flex items-center space-x-2 text-sm ${
+          <div role="status" aria-live="polite" className={`dashboard-stream-status flex items-center space-x-2 text-sm ${
             isConnected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
           }`}>
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
@@ -164,19 +166,19 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
       {/* Error State */}
       {error && (
-        <div className="mx-6 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-500 rounded-lg">
+        <div className="dashboard-feed-error mx-6 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-500 rounded-lg" role="alert">
           <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
         </div>
       )}
 
       {/* Events */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+      <div className="dashboard-feed-events flex-1 overflow-y-auto px-6 py-4 space-y-3 bg-gray-50 dark:bg-gray-900">
         {events.length === 0 ? (
-          <div className="text-center py-12">
+          <div className="dashboard-empty-state text-center py-12">
             <AlertCircle className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-600 mb-4" />
             <p className="text-gray-500 dark:text-gray-400">No alerts yet</p>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-              Health monitoring is active
+              {isConnected ? 'Live monitoring is connected. New alerts will appear here.' : 'Connect the backend and monitoring integrations to receive live alerts.'}
             </p>
           </div>
         ) : (

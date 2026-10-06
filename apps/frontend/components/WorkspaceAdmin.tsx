@@ -188,7 +188,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
 
   return (
     <div className={`workspace-admin-shell ${className}`}>
-      <div className="px-6 py-6 space-y-6 max-w-5xl">
+      <div className="workspace-admin-content px-6 py-6 space-y-6 max-w-5xl">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Workspace</h2>
           <button
@@ -207,7 +207,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
         )}
 
         {/* Workspace + members */}
-        <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+        <section className="workspace-panel rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
           <div className="flex items-center space-x-2 mb-3">
             <Building2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             <h3 className="font-semibold text-gray-900 dark:text-white">
@@ -248,7 +248,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
         </section>
 
         {/* Projects */}
-        <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+        <section className="workspace-panel rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
           <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Projects</h3>
 
           {canCreateProject && (
@@ -318,7 +318,7 @@ export function WorkspaceAdmin({ className = '' }: { className?: string }) {
         </section>
 
         {/* API keys */}
-        <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+        <section className="workspace-panel rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
           <div className="flex items-center space-x-2 mb-3">
             <KeyRound className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             <h3 className="font-semibold text-gray-900 dark:text-white">

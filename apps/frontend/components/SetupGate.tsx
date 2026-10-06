@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { SetupWizard } from './SetupWizard';
-import { hasCompletedSetup } from '../lib/setup';
 
 export function SetupGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -11,9 +10,7 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const forceSetup = params.get('setup') === '1';
-    const shouldShowSetup = forceSetup && !hasCompletedSetup();
-
-    setComplete(!shouldShowSetup || hasCompletedSetup());
+    setComplete(!forceSetup);
     setReady(true);
   }, []);
 

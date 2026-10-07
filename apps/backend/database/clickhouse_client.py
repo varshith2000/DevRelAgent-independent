@@ -33,13 +33,13 @@ class ClickHouseClient:
         """Establish connection to ClickHouse Cloud."""
         config.validate()
         try:
-            logger.info(f"Connecting to ClickHouse Cloud at {config.host}...")
+            logger.info(f"Connecting to ClickHouse at {config.host}...")
             self._client = clickhouse_connect.get_client(**config.to_client_kwargs())
             # Test connection
             result = self._client.query("SELECT 1")
-            logger.info("[OK] Successfully connected to ClickHouse Cloud!")
+            logger.info("[OK] Successfully connected to ClickHouse!")
         except Exception as e:
-            logger.error(f"❌ Failed to connect to ClickHouse Cloud: {e}")
+            logger.error(f"❌ Failed to connect to ClickHouse: {e}")
             raise
 
     def execute_query(self, query: str, parameters: Optional[dict] = None) -> Any:

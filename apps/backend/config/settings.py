@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     clickhouse_user: str = "default"
     clickhouse_password: str = ""
     clickhouse_database: str = "default"
-    clickhouse_secure: bool = False
+    clickhouse_secure: Optional[bool] = None
 
     # ── Grafana ───────────────────────────────────────────────────────────
     grafana_url: str = "http://localhost:3000"

@@ -11,6 +11,14 @@ from typing import Optional
 from config.settings import get_settings
 
 
+def _default_clickhouse_secure() -> bool:
+    """Use TLS by default on common ClickHouse secure HTTP ports."""
+    settings = get_settings()
+    if settings.clickhouse_secure is not None:
+        return settings.clickhouse_secure
+    return settings.clickhouse_port in {443, 8443}
+
+
 @dataclass
 class ClickHouseConfig:
     """ClickHouse connection configuration."""
@@ -22,7 +30,10 @@ class ClickHouseConfig:
     database: str = field(default_factory=lambda: get_settings().clickhouse_database)
 
     # Connection settings
-    secure: bool = True  # Use HTTPS for ClickHouse Cloud
+    secure: bool = field(
+        default_factory=lambda: _default_clickhouse_secure()
+    )
+    # Local ClickHouse defaults to HTTP; cloud TLS ports are secure by default.
     verify: bool = True  # Verify SSL certificate
     connect_timeout: int = 10
     send_receive_timeout: int = 300
@@ -32,7 +43,7 @@ class ClickHouseConfig:
         missing = []
         if not self.host:
             missing.append("CLICKHOUSE_HOST")
-        if not self.password:
+        if self.secure and not self.password:
             missing.append("CLICKHOUSE_PASSWORD")
         if missing:
             raise ValueError(

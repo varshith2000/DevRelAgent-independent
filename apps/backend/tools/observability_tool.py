@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional, Union
 
+from database.observability_store import get_observability_store
+
 from tools.registry import ToolCategory, tool
 
 logger = logging.getLogger(__name__)
@@ -151,8 +153,6 @@ async def get_error_rate(
         Structured error rate metrics
     """
     try:
-        from database.clickhouse_client import get_clickhouse_client
-
         # Validate time range
         time_range = TimeRange.from_minutes(time_range_minutes)
         if not time_range.validate(max_minutes=1440):
@@ -161,7 +161,7 @@ async def get_error_rate(
                 "error": "Time range exceeds maximum of 1440 minutes (24 hours)"
             }
 
-        client = get_clickhouse_client()
+        client = get_observability_store()
 
         # Build query with enforced limits
         service_filter = ""
@@ -176,7 +176,7 @@ async def get_error_rate(
             count() as total_requests,
             countIf(status_code >= 400) as error_count,
             (error_count / total_requests) * 100 as error_rate
-        FROM logs
+        FROM logs.logs
         WHERE timestamp >= now() - INTERVAL {time_range_minutes} MINUTE
             {service_filter}
         GROUP BY service, interval
@@ -314,8 +314,6 @@ async def get_top_errors(
         Structured top errors data
     """
     try:
-        from database.clickhouse_client import get_clickhouse_client
-
         # Validate inputs
         time_range = TimeRange.from_minutes(time_range_minutes)
         if not time_range.validate(max_minutes=1440):
@@ -326,7 +324,7 @@ async def get_top_errors(
 
         limit = min(limit, 100)
 
-        client = get_clickhouse_client()
+        client = get_observability_store()
 
         # Build service filter
         service_filter = ""
@@ -351,9 +349,10 @@ async def get_top_errors(
             max(timestamp) as last_seen,
             countDistinct(trace_id) as affected_traces,
             any(trace_id) as example_trace_id
-        FROM logs
+        FROM logs.logs
         WHERE timestamp >= now() - INTERVAL {time_range_minutes} MINUTE
             AND status_code >= 400
+            AND error_message != ''
             {service_filter}
         GROUP BY group_key, service
         ORDER BY error_count DESC
@@ -372,8 +371,9 @@ async def get_top_errors(
         errors = []
         for row in result.data:
             errors.append({
-                "error_message": row.get('error_message') if group_by == "message" else None,
-                "error_type": row.get('error_type') if group_by == "type" else None,
+                "error_message": row.get('group_key') if group_by == "message" else None,
+                "error_type": row.get('group_key') if group_by == "type" else None,
+                "group_value": row.get('group_key'),
                 "service": row.get('service'),
                 "count": row.get('error_count'),
                 "first_seen": row.get('first_seen'),
@@ -453,8 +453,6 @@ async def get_latency_metrics(
         Structured latency metrics
     """
     try:
-        from database.clickhouse_client import get_clickhouse_client
-
         if not services:
             return {
                 "success": False,
@@ -468,10 +466,12 @@ async def get_latency_metrics(
                 "error": "Time range exceeds maximum"
             }
 
-        client = get_clickhouse_client()
+        client = get_observability_store()
         service_list = "', '".join(services)
 
-        # Build percentile functions
+        # Request-level duration is currently normalized into logs.logs by the
+        # demo loader and compatible log ingestion. Trace spans are summarized
+        # separately below from the OpenTelemetry traces table.
         percentile_funcs = ", ".join([
             f"quantile({p/100})(duration_ms) as p{p}"
             for p in percentiles
@@ -484,9 +484,10 @@ async def get_latency_metrics(
             max(duration_ms) as max_latency,
             avg(duration_ms) as avg_latency,
             count() as request_count
-        FROM logs
+        FROM logs.logs
         WHERE timestamp >= now() - INTERVAL {time_range_minutes} MINUTE
             AND service IN ('{service_list}')
+            AND status_code > 0
             AND status_code < 400
         GROUP BY service
         ORDER BY service
@@ -503,14 +504,14 @@ async def get_latency_metrics(
         # Get span breakdown
         span_query = f"""
         SELECT
-            service,
+            service_name AS service,
             span_name,
-            avg(duration_ms) as avg_duration,
+            avg(duration_ns / 1000000) as avg_duration,
             count() as span_count
-        FROM spans
+        FROM logs.otel_traces
         WHERE timestamp >= now() - INTERVAL {time_range_minutes} MINUTE
-            AND service IN ('{service_list}')
-        GROUP BY service, span_name
+            AND service_name IN ('{service_list}')
+        GROUP BY service_name, span_name
         ORDER BY service, avg_duration DESC
         """
 
@@ -622,8 +623,6 @@ async def correlate_error_with_traces(
         Correlated trace data
     """
     try:
-        from database.clickhouse_client import get_clickhouse_client
-
         time_range = TimeRange.from_minutes(time_range_minutes)
         if not time_range.validate(max_minutes=1440):
             return {
@@ -632,27 +631,32 @@ async def correlate_error_with_traces(
             }
 
         limit = min(limit, 50)
-        client = get_clickhouse_client()
+        client = get_observability_store()
 
         # Build query based on input
         if trace_id:
             query = f"""
             SELECT
                 trace_id,
-                service,
-                error_message,
-                timestamp,
-                duration_ms,
-                count() as span_count,
-                status_code,
-                endpoint
-            FROM logs
+                service_name AS service,
+                anyIf(status_message, status_message != '') AS error_message,
+                min(timestamp) AS timestamp,
+                max(duration_ns) / 1000000 AS duration_ms,
+                count() AS span_count,
+                toUInt16OrZero(anyIf(attributes['http.response.status_code'], attributes['http.response.status_code'] != '')) AS status_code,
+                anyIf(attributes['http.route'], attributes['http.route'] != '') AS endpoint
+            FROM logs.otel_traces
             WHERE trace_id = '{trace_id}'
-            GROUP BY trace_id, service, error_message, timestamp, duration_ms, status_code, endpoint
+            GROUP BY trace_id, service_name
+            ORDER BY timestamp DESC
             LIMIT {limit}
             """
         else:
-            conditions = [f"timestamp >= now() - INTERVAL {time_range_minutes} MINUTE"]
+            conditions = [
+                f"timestamp >= now() - INTERVAL {time_range_minutes} MINUTE",
+                "status_code >= 400",
+                "error_message != ''",
+            ]
             if error_message:
                 conditions.append(f"error_message LIKE '%{error_message}%'")
             if service:
@@ -670,7 +674,7 @@ async def correlate_error_with_traces(
                 count() as span_count,
                 any(status_code) as status_code,
                 any(endpoint) as endpoint
-            FROM logs
+            FROM logs.logs
             WHERE {where_clause}
             GROUP BY trace_id
             ORDER BY timestamp DESC
@@ -779,8 +783,6 @@ async def compare_before_after(
         Before/after comparison data
     """
     try:
-        from database.clickhouse_client import get_clickhouse_client
-
         # Validate time ranges
         before_range = TimeRange(
             start=datetime.fromisoformat(timestamp) - timedelta(minutes=before_minutes),
@@ -797,7 +799,7 @@ async def compare_before_after(
                 "error": "Time range exceeds maximum"
             }
 
-        client = get_clickhouse_client()
+        client = get_observability_store()
         service_list = "', '".join(services) if services else None
 
         # Build comparison query
@@ -810,7 +812,7 @@ async def compare_before_after(
             count() as request_count,
             countIf(status_code >= 400) / count() * 100 as error_rate,
             quantile(0.95)(duration_ms) as latency_p95
-        FROM logs
+        FROM logs.logs
         WHERE timestamp >= '{before_range.start.isoformat()}'
             AND timestamp < '{before_range.end.isoformat()}'
             {service_filter}
@@ -824,7 +826,7 @@ async def compare_before_after(
             count() as request_count,
             countIf(status_code >= 400) / count() * 100 as error_rate,
             quantile(0.95)(duration_ms) as latency_p95
-        FROM logs
+        FROM logs.logs
         WHERE timestamp >= '{after_range.start.isoformat()}'
             AND timestamp < '{after_range.end.isoformat()}'
             {service_filter}

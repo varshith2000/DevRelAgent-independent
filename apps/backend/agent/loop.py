@@ -544,8 +544,15 @@ class AgentLoop:
             intent = "index_repo"
             tool_hint = "index_repository"
 
-        # Check for dashboard creation BEFORE database_query
-        # This ensures "Create a dashboard" queries are routed correctly
+        elif any(w in user_lower for w in [
+            "generate", "create", "write", "produce", "make"
+        ]) and any(w in user_lower for w in [
+            "opentelemetry", "otel", "telemetry config", "instrumentation config"
+        ]):
+            intent = "config_generation"
+            tool_hint = "generate_opentelemetry_config"
+            entities = [user_input]
+
         elif any(w in user_lower for w in [
             "dashboard", "grafana", "panel", "visualization", "visualize",
             "create dashboard", "build dashboard", "setup dashboard"
@@ -1095,6 +1102,26 @@ class AgentLoop:
         elif tool_name == "create_grafana_dashboard":
             # Pass the full user query as natural_query parameter
             arguments["natural_query"] = perception.user_input
+
+        # Handle OpenTelemetry configuration generation with safe defaults.
+        elif tool_name == "generate_opentelemetry_config":
+            service_match = re.search(
+                r"(?:for\s+(?!a\b|an\b|the\b)|(?:service\s+)?(?:named|called)\s+)([a-zA-Z0-9_.-]+)", perception.user_input, re.IGNORECASE
+            )
+            language = next(
+                (candidate for candidate in (
+                    "python", "javascript", "typescript", "java", "go", "dotnet", "ruby", "php"
+                ) if re.search(rf"\b{re.escape(candidate)}\b", perception.user_input, re.IGNORECASE)),
+                "python",
+            )
+            arguments.update({
+                "service_name": service_match.group(1) if service_match else "my-service",
+                "language": language,
+                "otlp_endpoint": "localhost:4317",
+                "enable_traces": True,
+                "enable_metrics": True,
+                "enable_logs": False,
+            })
 
         # Add session context ONLY for tools that explicitly support it
         # Most tools (including clickhouse_query) do NOT need session_id

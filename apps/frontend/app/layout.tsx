@@ -23,8 +23,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The interface is dark-only (see theme.css), so the dark variant is pinned
+  // on the root element instead of following the visitor's OS colour scheme.
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

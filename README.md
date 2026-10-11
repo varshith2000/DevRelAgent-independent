@@ -2,6 +2,17 @@
 
 > 24/7 AI-Powered Developer Relations Agent — Combines RAG, observability, code intelligence, browser automation, and a Known Error Database to supercharge developer support.
 
+## Live demo
+
+**[Open the demo site →](https://varshith2000.github.io/DevRelAgent-independent/)**
+
+The demo is a static build of `apps/frontend` that runs with checked-in synthetic
+data — no backend, database or credentials required. It exercises the real UI:
+chat answers with evidence and tool calls, the system-health dashboard with a
+simulated live feed, the human-in-the-loop approval queue, and workspace/project
+administration. See [docs/DEMO_SITE.md](./docs/DEMO_SITE.md) for how the demo
+build works and how it is deployed.
+
 ## CLI Usage
 
 The DevRelAgent CLI provides production-grade command-line interface with multiple flags for different use cases:

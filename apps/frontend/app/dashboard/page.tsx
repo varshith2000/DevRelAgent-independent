@@ -5,6 +5,7 @@ import { AppHeader } from '../../components/AppHeader';
 import { DashboardFeed } from '../../components/DashboardFeed';
 import { SystemStatus } from '../../components/SystemStatus';
 import { apiFetch } from '../../lib/api';
+import { withBasePath } from '../../lib/app-config';
 
 interface ServiceStatus {
   [key: string]: 'green' | 'yellow' | 'red';
@@ -41,7 +42,7 @@ export default function DashboardPage() {
 
   const handleInvestigate = (event: { service: string; message: string }) => {
     const query = new URLSearchParams({ q: `Investigate ${event.service} - ${event.message}` });
-    window.location.assign(`/?${query.toString()}`);
+    window.location.assign(withBasePath(`/?${query.toString()}`));
   };
 
   return (

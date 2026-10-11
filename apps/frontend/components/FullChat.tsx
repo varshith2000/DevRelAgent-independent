@@ -7,6 +7,7 @@ import { SqlSandbox } from './SqlSandbox';
 import { AppHeader } from './AppHeader';
 import { apiFetch } from '../lib/api';
 import { getIdentity, getProject, IDENTITY_EVENT } from '../lib/auth';
+import { DEMO_MODE, withBasePath } from '../lib/app-config';
 
 interface Message {
     id: string;
@@ -166,7 +167,7 @@ export function FullChat() {
                     setConversations([fresh, ...previous]);
                     setCurrentConversationId(fresh.id);
                     setInputValue(query);
-                    window.history.replaceState({}, '', '/');
+                    window.history.replaceState({}, '', withBasePath('/'));
                 }
             }
         };
@@ -428,7 +429,7 @@ export function FullChat() {
                         ))}
                     </div>
                     {conversations.length === 0 && <p className="chat-sidebar-empty">Your conversations will appear here.</p>}
-                    <button type="button" className="chat-sidebar-guide" onClick={() => window.open('/guide', '_blank', 'noopener,noreferrer')}><BookOpen size={15} /><span>Explore the product guide</span></button>
+                    <button type="button" className="chat-sidebar-guide" onClick={() => window.open(withBasePath('/guide'), '_blank', 'noopener,noreferrer')}><BookOpen size={15} /><span>Explore the product guide</span></button>
                     <div className="chat-sidebar-bottom"><ShieldCheck size={15} /><span>Review high-impact actions in Approvals</span></div>
                 </aside>
                 </>
@@ -444,7 +445,7 @@ export function FullChat() {
                             <div className="chat-title-copy"><div className="chat-title-overline"><span className="chat-title-live-dot" /> DEVREL AGENT <span className="chat-title-separator">/</span> ENGINEERING OPS</div><h1>{currentConv?.title || 'New conversation'}</h1><p>Ask a question or describe an issue to investigate.</p></div>
                         </div>
                         <div className="chat-heading-status">
-                            <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? 'API CONNECTED' : backendReady === false ? 'API OFFLINE' : 'CONNECTING'}</span>
+                            <span className={`backend-indicator ${backendReady === true ? 'backend-online' : backendReady === false ? 'backend-offline' : ''}`}><i />{backendReady === true ? (DEMO_MODE ? 'DEMO DATA SOURCE' : 'API CONNECTED') : backendReady === false ? 'API OFFLINE' : 'CONNECTING'}</span>
                             <span className="chat-scope-badge"><ShieldCheck size={13} /> PROJECT SCOPE <ChevronDown size={12} /></span>
                         </div>
                     </div>

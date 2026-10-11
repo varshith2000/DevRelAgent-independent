@@ -4,6 +4,7 @@ import React from 'react';
 import { Activity, BookOpen, Bot, Building2, ShieldCheck, Sparkles, GitBranch } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { ProjectSwitcher } from './ProjectSwitcher';
+import { DEMO_MODE, withBasePath } from '../lib/app-config';
 
 export type TabKey = 'chat' | 'dashboard' | 'approvals' | 'workspace' | 'guide';
 
@@ -34,6 +35,8 @@ interface AppHeaderProps {
  */
 export function AppHeader({ active, title = 'DevRel Agent', subtitle }: AppHeaderProps) {
   const router = useRouter();
+  // The static export emits the report as a plain file; a served app exposes the route.
+  const reportHref = withBasePath(DEMO_MODE ? '/project-report.md' : '/project-report');
 
   return (
     <header className="app-shell-header">
@@ -65,9 +68,17 @@ export function AppHeader({ active, title = 'DevRel Agent', subtitle }: AppHeade
             </button>
           );
         })}
-        <a className="app-nav-guide app-nav-report" href="/project-report" target="_blank" rel="noreferrer">
+        <a className="app-nav-guide app-nav-report" href={reportHref} target="_blank" rel="noreferrer">
           <BookOpen size={15} /><span>Project report</span>
         </a>
+        {DEMO_MODE && (
+          <span
+            className="app-nav-demo"
+            title="Static demo build: every log line, metric and approval is synthetic sample data."
+          >
+            <Sparkles size={12} /><span>Demo data</span>
+          </span>
+        )}
       </nav>
     </header>
   );

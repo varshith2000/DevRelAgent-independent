@@ -23,6 +23,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { AppHeader } from '../../components/AppHeader';
+import { withBasePath } from '../../lib/app-config';
 
 export const metadata: Metadata = {
   title: 'Product guide — DevRelAgent',
@@ -190,7 +191,7 @@ export default function GuidePage() {
         <section className="guide-launch-section" id="getting-started">
           <div className="guide-section-heading"><span>THE OPERATOR'S CHECKLIST</span><h2>Connect it <em>without guesswork.</em></h2></div>
           <ol>{launchSteps.map((step, index) => <li key={step}><span>0{index + 1}</span><p>{step}</p></li>)}</ol>
-          <div className="guide-launch-links"><Link href="/?setup=1">Open the onboarding walkthrough <ArrowRight size={15} /></Link><a href="/project-report" target="_blank" rel="noreferrer">Read the full implementation and deployment report <ArrowUpRight size={15} /></a></div>
+          <div className="guide-launch-links"><Link href="/?setup=1">Open the onboarding walkthrough <ArrowRight size={15} /></Link><a href={withBasePath('/project-report')} target="_blank" rel="noreferrer">Read the full implementation and deployment report <ArrowUpRight size={15} /></a></div>
         </section>
 
         <section className="guide-trust-banner"><span className="guide-trust-icon"><ShieldCheck size={21} /></span><div><strong>Trust is a product feature. It is not a certification.</strong><p>The repository is an actively developed prototype. Default development identity is not production authentication; approvals and guardrails do not guarantee safe or correct outcomes. Before a customer deployment, complete security review, trusted OIDC integration, tenant-isolation tests, operational runbooks, and an honest capability demonstration.</p></div><Compass size={20} /></section>

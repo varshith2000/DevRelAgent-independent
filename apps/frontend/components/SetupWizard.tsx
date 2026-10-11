@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '../lib/api';
+import { withBasePath } from '../lib/app-config';
 import { getIdentity, setIdentity, setProject } from '../lib/auth';
 import { setSetupComplete } from '../lib/setup';
 
@@ -91,11 +92,11 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   return (
     <main className="setup-shell">
       <div className="setup-topbar">
-        <a className="brand-lockup" href="/" aria-label="DevRelAgent home">
+        <a className="brand-lockup" href={withBasePath('/')} aria-label="DevRelAgent home">
           <span className="brand-mark"><Activity size={19} strokeWidth={2.5} /></span>
           <span>DevRel<span className="brand-muted">Agent</span></span>
         </a>
-        <a className="setup-report-link" href="/guide" target="_blank" rel="noreferrer">
+        <a className="setup-report-link" href={withBasePath('/guide')} target="_blank" rel="noreferrer">
           <BookOpen size={16} /> Project guide
         </a>
       </div>
@@ -216,7 +217,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
           <div className="setup-sidebar-card truth-card">
             <TriangleAlert size={17} /><p><strong>Know the boundaries.</strong> This is an actively developed, self-hosted prototype—not a certified support or incident-response system. Capabilities vary with configured tools and indexed data.</p>
           </div>
-          <a className="setup-full-guide" href="/guide" target="_blank" rel="noreferrer">Explore the full product guide <ArrowRight size={15} /></a>
+          <a className="setup-full-guide" href={withBasePath('/guide')} target="_blank" rel="noreferrer">Explore the full product guide <ArrowRight size={15} /></a>
         </aside>
       </div>
       <footer className="setup-footer"><span>DEVRELAGENT · SELF-HOSTED DEVELOPER SUPPORT</span><span>Built to make engineering context easier to explore.</span></footer>

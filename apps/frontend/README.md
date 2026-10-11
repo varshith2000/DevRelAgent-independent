@@ -34,3 +34,22 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Static demo build (GitHub Pages)
+
+This app can be compiled as a backend-less demo that runs entirely on synthetic
+data, which is what the public GitHub Pages site serves:
+
+```bash
+NEXT_PUBLIC_DEMO_MODE=true NEXT_PUBLIC_BASE_PATH=/<repo> npm run build   # → out/
+```
+
+`NEXT_PUBLIC_DEMO_MODE=true` answers every API call from
+[`lib/demo-data.ts`](./lib/demo-data.ts) via [`lib/demo.ts`](./lib/demo.ts),
+simulates the dashboard event stream, and switches the build to `output: 'export'`.
+`NEXT_PUBLIC_BASE_PATH` is the hosting sub-path (project pages live at
+`https://<owner>.github.io/<repo>/`). Leave both unset for normal development
+against `NEXT_PUBLIC_API_URL`.
+
+See [../../docs/DEMO_SITE.md](../../docs/DEMO_SITE.md) for the full walkthrough and
+the deployment workflow.

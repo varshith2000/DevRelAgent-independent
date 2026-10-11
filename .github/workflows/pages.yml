@@ -1,0 +1,89 @@
+name: Deploy demo site
+
+on:
+  push:
+    branches: ["varshith/devRel", "main"]
+    paths:
+      - "apps/frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# GitHub Pages deployments need a Pages token plus the OIDC token that
+# proof-of-possession for it requires; everything else is read-only.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages allows one deployment at a time: let the running one finish and keep
+# only the newest queued run.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build static demo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve the Pages base path
+        id: base
+        # Project pages are served from https://<owner>.github.io/<repo>/, so the
+        # export is built with that repo name as its base path.
+        run: echo "path=/${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the backend-less demo export
+        env:
+          NEXT_PUBLIC_DEMO_MODE: "true"
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.base.outputs.path }}
+        run: npm run build
+
+      - name: Publish the project report as a static asset
+        # The report is a build-time route handler; static hosting needs a file
+        # with an extension so browsers render it instead of downloading it.
+        run: cp out/project-report out/project-report.md
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: apps/frontend/out
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # Optional. Only used to enable Pages on the very first run; GITHUB_TOKEN
+      # is not allowed to enable Pages, so this expects a PAT with the `repo`
+      # scope. See docs/DEMO_SITE.md for the one-time setup.
+      PAGES_SETUP_TOKEN: ${{ secrets.PAGES_SETUP_TOKEN }}
+    steps:
+      - name: Enable Pages (first run only)
+        if: env.PAGES_SETUP_TOKEN != ''
+        uses: actions/configure-pages@v6
+        with:
+          enablement: true
+          token: ${{ secrets.PAGES_SETUP_TOKEN }}
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

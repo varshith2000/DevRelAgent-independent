@@ -3,7 +3,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { AlertCard } from './AlertCard';
-import { apiFetch, authUrl } from '../lib/api';
+import { apiFetch } from '../lib/api';
+import { withBasePath } from '../lib/app-config';
+import { openStream, type StreamHandle } from '../lib/stream';
 import { IDENTITY_EVENT } from '../lib/auth';
 
 interface DashboardEvent {
@@ -36,53 +38,48 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
   }, []);
 
   useEffect(() => {
-    let eventSource: EventSource | null = null;
+    let stream: StreamHandle | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
 
     const connect = () => {
       try {
-        eventSource = new EventSource(authUrl('/dashboard/stream'));
+        stream = openStream('/dashboard/stream', {
+          onOpen: () => {
+            setIsConnected(true);
+            setError(null);
+          },
+          onError: () => {
+            setIsConnected(false);
+            setError('Live activity disconnected. Retrying shortly.');
 
-        eventSource.onopen = () => {
-          setIsConnected(true);
-          setError(null);
-        };
+            // Reconnect after 5 seconds
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              stream?.close();
+              connect();
+            }, 5000);
+          },
+          onMessage: (raw) => {
+            try {
+              const data = JSON.parse(raw);
 
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            if (data.type === 'connected') {
-              // Stream is live; the header indicator reflects the current connection state.
-            } else if (data.type === 'ping') {
-              // Keepalive, ignore
-            } else if (data.type === 'system_status') {
-              // System status update, could be used to update status component
-            } else if (data.type === 'alert' && data.data) {
-              // New alert
-              setEvents(prev => [data.data, ...prev].slice(0, 100)); // Keep last 100
-            } else if (data.type === 'error') {
-              setError(data.error || 'Stream error');
+              if (data.type === 'connected') {
+                // Stream is live; the header indicator reflects the current connection state.
+              } else if (data.type === 'ping') {
+                // Keepalive, ignore
+              } else if (data.type === 'system_status') {
+                // System status update, could be used to update status component
+              } else if (data.type === 'alert' && data.data) {
+                // New alert
+                setEvents(prev => [data.data, ...prev].slice(0, 100)); // Keep last 100
+              } else if (data.type === 'error') {
+                setError(data.error || 'Stream error');
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e);
             }
-          } catch (e) {
-            console.error('Failed to parse SSE data:', e);
-          }
-        };
-
-        eventSource.onerror = () => {
-          setIsConnected(false);
-          setError('Live activity disconnected. Retrying shortly.');
-
-          // Reconnect after 5 seconds
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(() => {
-            if (eventSource) {
-              eventSource.close();
-            }
-            connect();
-          }, 5000);
-        };
-
+          },
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to connect to dashboard');
       }
@@ -108,9 +105,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (eventSource) {
-        eventSource.close();
-      }
+      stream?.close();
     };
   }, [scope]);
 
@@ -133,7 +128,7 @@ export function DashboardFeed({ onInvestigate, className = '' }: DashboardFeedPr
     } else {
       // Default behavior: navigate to chat with investigation query
       const query = new URLSearchParams({ q: `Investigate ${event.service} - ${event.message}` });
-      window.location.assign(`/?${query.toString()}`);
+      window.location.assign(withBasePath(`/?${query.toString()}`));
     }
   }, [onInvestigate]);
 

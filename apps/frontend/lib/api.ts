@@ -5,6 +5,7 @@
  * Falls back to the local dev server so `npm run dev` works out of the box.
  */
 
+import { DEMO_MODE } from './app-config';
 import { authHeaders, authQueryParams, projectHeaders } from './auth';
 
 export const API_BASE_URL: string =
@@ -28,8 +29,18 @@ export function authUrl(path: string): string {
   return url.toString();
 }
 
-/** `fetch` against the backend with the caller's identity and project attached. */
+/**
+ * `fetch` against the backend with the caller's identity and project attached.
+ *
+ * In the static demo build there is no backend, so requests are answered from
+ * the checked-in fixtures instead (see `lib/demo.ts`).
+ */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  if (DEMO_MODE) {
+    const { demoFetch } = await import('./demo');
+    return demoFetch(path, init);
+  }
+
   const headers = new Headers(init.headers);
   for (const [key, value] of Object.entries({ ...authHeaders(), ...projectHeaders() })) {
     if (!headers.has(key)) headers.set(key, value);

@@ -57,6 +57,20 @@ jobs:
         # with an extension so browsers render it instead of downloading it.
         run: cp out/project-report out/project-report.md
 
+      - name: Verify the export
+        # Fail here, with a readable message, if a build regression leaves the
+        # export incomplete; a broken artifact otherwise only shows up as a
+        # blank page after the deploy.
+        run: |
+          set -eu
+          for f in index.html 404.html dashboard/index.html approvals/index.html \
+                   guide/index.html workspace/index.html project-report.md; do
+            test -f "out/$f" || { echo "missing from export: out/$f" >&2; exit 1; }
+          done
+          grep -q '${{ steps.base.outputs.path }}/_next/static/' out/index.html \
+            || { echo "index.html does not reference the base path" >&2; exit 1; }
+          echo "export verified: $(find out -type f | wc -l) files"
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: apps/frontend/out

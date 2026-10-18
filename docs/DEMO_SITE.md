@@ -9,6 +9,13 @@ request is answered from a checked-in synthetic dataset.
 - **Workflow:** [`.github/workflows/pages.yml`](../.github/workflows/pages.yml)
 - **Fixtures:** [`apps/frontend/lib/demo-data.ts`](../apps/frontend/lib/demo-data.ts)
 
+> The account's user site (`varshith2000.github.io`) has the custom domain
+> `varshithchennuru.dev`, which makes every `varshith2000.github.io/<repo>/` URL a
+> 301 to `varshithchennuru.dev/<repo>/` — that redirect applies to project pages
+> too. So the demo is served at
+> **https://varshithchennuru.dev/DevRelAgent-independent/**, and the base path the
+> workflow builds with (`/DevRelAgent-independent`) is correct for both hosts.
+
 ## What the demo contains
 
 Everything is synthetic and modelled on the `orders-api` connection-pool incident

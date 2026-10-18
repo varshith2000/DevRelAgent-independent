@@ -98,6 +98,15 @@ Either:
 > check the plan before the first run. On Enterprise Cloud the published site can
 > also be restricted to organisation members.
 
+### Troubleshooting
+
+`Error: Get Pages site failed ... Error: Not Found` from `actions/configure-pages`
+means the repository has no Pages site yet — the build job above it succeeded and
+the demo export is fine. Confirm that *Settings → Pages → Source* is **GitHub
+Actions** (not "Deploy from a branch"), or supply `PAGES_SETUP_TOKEN` and re-run so
+the enablement step creates the site. The error shows up in the `deploy` job, not
+in `build`, which is how to tell it apart from a failing static export.
+
 ## Verification performed
 
 The static export was built and served from a sub-path directory, then exercised

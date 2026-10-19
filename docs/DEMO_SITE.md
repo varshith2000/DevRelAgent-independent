@@ -98,6 +98,26 @@ Either:
 > check the plan before the first run. On Enterprise Cloud the published site can
 > also be restricted to organisation members.
 
+### Fastest path (from a terminal, as repository admin)
+
+```bash
+# 1. Pages on a private repo needs a paid plan, so make it public (Free plan)…
+gh repo edit varshith2000/DevRelAgent-independent \
+  --visibility public --accept-visibility-change-consequences
+
+# 2. Create the Pages site, configured for workflow deployments…
+gh api -X POST repos/varshith2000/DevRelAgent-independent/pages \
+  -f build_type=workflow
+
+# 3. Re-run the deploy workflow…
+gh workflow run pages.yml --ref varshith/devRel
+gh run list --workflow pages.yml --limit 1
+```
+
+Both API calls need repository admin, and step 2 returns `422` if the site already
+exists (then only step 3 is needed). Step 1 is only required on the Free plan; on
+Pro/Team/Enterprise the repository can stay private.
+
 ### Troubleshooting
 
 `Error: Get Pages site failed ... Error: Not Found` from `actions/configure-pages`

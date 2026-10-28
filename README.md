@@ -1,4 +1,4 @@
-# DevRelAgent
+# DevRelAgent - Demo
 
 > 24/7 AI-Powered Developer Relations Agent — Combines RAG, observability, code intelligence, browser automation, and a Known Error Database to supercharge developer support.
 
